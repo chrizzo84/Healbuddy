@@ -80,21 +80,85 @@ local function OnMana()
     if gained then Gain(GetTime()) end
 end
 
--- Ist das Mana geheim, verrät immer noch der Zeitpunkt des Events den Tick:
--- jede Mana-Änderung, die nicht direkt auf einen eigenen Zauber folgt, zählt.
--- Bei vollem Mana kommen keine Events mehr, der Balken blendet sich dann aus.
+-- Schießen (Zauberstab), Automatischer Schuss, Nahkampf: kosten nie Mana
+local FREE = { [5019] = true, [75] = true, [6603] = true }
+local autoRepeat, lastCastInfo = false, "noch keiner"
+local lastPower, pendingCast
+local powerEvents = 0
+
+local function StartFSR(now)
+    lastCast, pendingCast = now, nil
+    -- Der Manaabzug kann knapp vor dem Zauber-Event eintreffen: dann war es kein Tick
+    if secret and lastGain and now - lastGain < 0.3 then
+        lastGain, lastTick = prevGain, prevTick
+    end
+    if ns.db.fsr then
+        endTime = now + DURATION
+        bar:Show()
+    end
+end
+
+-- Auch bei geheimem Mana verrät der Zeitpunkt einer Mana-Änderung zweierlei:
+-- direkt an einem eigenen Zauber = Manakosten, sonst = Regenerations-Tick.
+-- Bei vollem Mana kommen keine Events mehr, der Tick-Balken blendet sich dann aus.
 local function OnPowerEvent(powerType)
-    if not secret then return end
     if powerType and not issecret(powerType) and powerType ~= "MANA" then return end
     local now = GetTime()
+    lastPower = now
+    powerEvents = powerEvents + 1
+    if pendingCast and now - pendingCast < 0.3 then
+        lastCastInfo = lastCastInfo .. " -> Manaänderung direkt danach: Manazauber"
+        return StartFSR(now)
+    end
+    if not secret then return end
     if lastCast and now - lastCast < 0.5 then return end
     Gain(now)
 end
 
+-- true = kostet Mana, false = sicher nicht, nil = nicht auslesbar
+local function CostsMana(spellID)
+    if not issecret(spellID) and FREE[spellID] then
+        lastCastInfo = "kostenlos (Zauberstab/Autoschuss)"
+        return false
+    end
+    local ok, cost = pcall(ns.ManaCost, spellID)
+    if ok and cost then
+        lastCastInfo = "Kosten " .. cost
+        return cost > 0
+    end
+    lastCastInfo = issecret(spellID) and "Zauber-ID geheim" or "Kosten unbekannt"
+    return nil
+end
+
+local function OnCastSucceeded(spellID)
+    local costs = CostsMana(spellID)
+    local now = GetTime()
+    if costs then
+        StartFSR(now)
+    elseif costs == nil then
+        -- Kosten nicht auslesbar (Zauberstab, Gegenstände, Berufe, geheime IDs):
+        -- nur werten, wenn sich zeitgleich das Mana geändert hat.
+        if autoRepeat then
+            lastCastInfo = lastCastInfo .. ", Zauberstab aktiv: ignoriert"
+        elseif powerEvents == 0 then
+            -- Der Client meldet gar keine Mana-Änderungen: lieber anzeigen als verschweigen
+            lastCastInfo = lastCastInfo .. ", keine Mana-Events vorhanden: als Manazauber gewertet"
+            StartFSR(now)
+        elseif lastPower and now - lastPower < 0.3 then
+            lastCastInfo = lastCastInfo .. ", Manaänderung direkt davor: Manazauber"
+            StartFSR(now)
+        else
+            lastCastInfo = lastCastInfo .. ", warte auf Manaänderung"
+            pendingCast = now
+        end
+    end
+end
+
 function ns.FSRDebug()
     if not bar then return ns.Print("Tickanzeige: für diese Klasse nicht aktiv.") end
+    ns.Print("Letzter Zauber: " .. lastCastInfo .. ("; Mana-Events bisher: %d"):format(powerEvents))
     if secret then
-        return ns.Print(("Tickanzeige: Mana ist geheim, Ticks werden über Events geschätzt. Events erkannt: %d, letzter Abstand: %s s, fließend-Zähler: %d, Option an: %s"):format(
+        return ns.Print(("Tickanzeige: Mana ist geheim, Ticks werden über Events geschätzt. Ticks erkannt: %d, letzter Abstand: %s s, fließend-Zähler: %d, Option an: %s"):format(
             gains, lastInterval and ("%.2f"):format(lastInterval) or "-", smooth, tostring(ns.db.fsr)))
     end
     ns.Print(("Tickanzeige: Mana %s/%s, Zuwächse erkannt: %d, letzter Abstand: %s s, fließend-Zähler: %d, voll: %s, Option an: %s"):format(
@@ -102,24 +166,15 @@ function ns.FSRDebug()
         lastInterval and ("%.2f"):format(lastInterval) or "-", smooth, tostring(full), tostring(ns.db.fsr)))
 end
 
-local function OnCast(spellID)
-    -- Bei unbekannten Kosten lieber anzeigen als verschweigen
-    local ok, cost = pcall(ns.ManaCost, spellID)
-    if ok and cost == 0 then return end
-    endTime = GetTime() + DURATION
-    bar:Show()
-end
-
 local function OnEvent(_, event, _, arg2, spellID)
     if event == "UNIT_POWER_UPDATE" then
         ns.Safe(OnPowerEvent, arg2)
+    elseif event == "START_AUTOREPEAT_SPELL" then
+        autoRepeat = true
+    elseif event == "STOP_AUTOREPEAT_SPELL" then
+        autoRepeat = false
     else
-        lastCast = GetTime()
-        -- Der Manaabzug kann knapp vor diesem Event eintreffen: dann war es kein Tick
-        if secret and lastGain and lastCast - lastGain < 0.3 then
-            lastGain, lastTick = prevGain, prevTick
-        end
-        if ns.db.fsr then OnCast(spellID) end
+        ns.Safe(OnCastSucceeded, spellID)
     end
 end
 
@@ -160,6 +215,8 @@ function ns.CreateFSR(anchor)
     local ev = CreateFrame("Frame")
     ev:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
     ev:RegisterUnitEvent("UNIT_POWER_UPDATE", "player")
+    pcall(ev.RegisterEvent, ev, "START_AUTOREPEAT_SPELL")
+    pcall(ev.RegisterEvent, ev, "STOP_AUTOREPEAT_SPELL")
     ev:SetScript("OnEvent", OnEvent)
     C_Timer.NewTicker(0.1, function() ns.Safe(OnMana) end)
 end

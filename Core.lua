@@ -240,6 +240,12 @@ local function Defaults()
     if db.fsr == nil then db.fsr = true end
     if db.context == nil then db.context = false end
     if db.pets == nil then db.pets = false end
+    if db.preset == nil then db.preset = "Kompakt" end
+    if db.width == nil then db.width = 88 end
+    if db.height == nil then db.height = 40 end
+    if db.texture == nil then db.texture = "Standard" end
+    if db.colorMode == nil then db.colorMode = "class" end
+    if db.percent == nil then db.percent = true end
     if db.minimapAngle == nil then db.minimapAngle = 215 end
     if not cdb.bindings then
         cdb.bindings = {}

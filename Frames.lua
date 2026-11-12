@@ -5,10 +5,40 @@ local BW, BH, GAP, HANDLE = 88, 40, 2, 14
 local MAX_BUFFS, MAX_DEBUFFS = 3, 3
 local BAR = "Interface\\TargetingFrame\\UI-StatusBar"
 
+---------------------------------------------------------------------------
+-- Skins: Voreinstellungen aus Größe, Balkentextur und Farbschema
+---------------------------------------------------------------------------
+ns.TEXTURES = {
+    { value = "Standard", text = "Standard", file = BAR },
+    { value = "Glatt", text = "Glatt", file = "Interface\\Buttons\\WHITE8x8" },
+    { value = "Blizzard", text = "Blizzard", file = "Interface\\RaidFrame\\Raid-Bar-Hp-Fill" },
+    { value = "Streifen", text = "Streifen", file = "Interface\\PaperDollInfoFrame\\UI-Character-Skills-Bar" },
+}
+ns.COLORS = {
+    { value = "class", text = "Klassenfarbe" },
+    { value = "green", text = "Grün" },
+    { value = "dark", text = "Dunkel, Name in Klassenfarbe" },
+}
+ns.SKINS = {
+    { value = "Kompakt", text = "Kompakt", width = 88, height = 40, texture = "Standard", colorMode = "class", percent = true },
+    { value = "Dunkel", text = "Dunkel", width = 88, height = 40, texture = "Glatt", colorMode = "dark", percent = true },
+    { value = "Breit", text = "Breit", width = 132, height = 28, texture = "Standard", colorMode = "class", percent = true },
+    { value = "Minimal", text = "Minimal", width = 64, height = 32, texture = "Glatt", colorMode = "green", percent = false },
+    { value = "Blizzard", text = "Blizzard", width = 88, height = 40, texture = "Blizzard", colorMode = "green", percent = true },
+}
+ns.SIZE = { minW = 56, maxW = 160, minH = 24, maxH = 60, step = 4 }
+
+local function TextureFile()
+    for _, t in ipairs(ns.TEXTURES) do
+        if t.value == ns.db.texture then return t.file end
+    end
+    return BAR
+end
+
 local container, handle
 local buttons, byUnit = {}, {}
 ns.buttons = buttons
-local readyCheck = false
+local readyCheck, readyRound = false, 0
 local clicked, clickTime
 
 ---------------------------------------------------------------------------
@@ -19,17 +49,25 @@ local function UpdateName(b)
     b.name:SetText(UnitName(u) or "")
     local _, class = UnitClass(u)
     local c = b.kind ~= "pet" and class and not issecret(class) and RAID_CLASS_COLORS and RAID_CLASS_COLORS[class]
-    if c then
-        b.bar:SetStatusBarColor(c.r, c.g, c.b)
+    local mode = ns.db.colorMode
+    if mode == "dark" then
+        b.bar:SetStatusBarColor(0.2, 0.2, 0.23)
+        if c then b.name:SetTextColor(c.r, c.g, c.b) else b.name:SetTextColor(1, 1, 1) end
     else
-        b.bar:SetStatusBarColor(0.2, 0.7, 0.3)
+        b.name:SetTextColor(1, 1, 1)
+        if c and mode ~= "green" then
+            b.bar:SetStatusBarColor(c.r, c.g, c.b)
+        else
+            b.bar:SetStatusBarColor(0.2, 0.7, 0.3)
+        end
     end
 end
 
 -- Eingehende Heilung: zweiter Balken, der rechts an den Lebensbalken anschließt
 local function UpdatePrediction(b, clear)
     if not UnitGetIncomingHeals then return end
-    if clear then
+    local dead = UnitIsDeadOrGhost(b.unit)
+    if clear or (not issecret(dead) and dead) then
         b.pred:SetValue(0)
         return
     end
@@ -41,6 +79,11 @@ local function UpdateHealth(b)
     local u = b.unit
     local connected = UnitIsConnected(u)
     local dead = UnitIsDeadOrGhost(u)
+    -- Totstellen (Jäger) ist kein Tod
+    if not issecret(dead) and dead and UnitIsFeignDeath then
+        local feign = UnitIsFeignDeath(u)
+        if not issecret(feign) and feign then dead = false end
+    end
     if not issecret(connected) and not connected then
         b.bar:SetMinMaxValues(0, 1); b.bar:SetValue(0)
         b.status:SetText("Offline")
@@ -58,7 +101,9 @@ local function UpdateHealth(b)
     b.bar:SetMinMaxValues(0, max)
     b.bar:SetValue(hp)
 
-    if not issecret(hp) and not issecret(max) then
+    if not ns.db.percent then
+        b.status:SetText("")
+    elseif not issecret(hp) and not issecret(max) then
         if max > 0 then
             b.status:SetFormattedText("%.0f%%", hp / max * 100)
         else
@@ -124,19 +169,30 @@ local function HasBuff(unit, name)
     return false
 end
 
+-- Fehlt der Einheit der eigene Klassenbuff? (nur außerhalb des Kampfes prüfbar)
+local function NeedsBuff(b)
+    local buff, u = ns.classBuff, b.unit
+    if not (buff and b.kind ~= "pet" and C_UnitAuras and UnitExists(u) and UnitIsConnected(u)
+        and not UnitIsDeadOrGhost(u) and UnitIsVisible(u)) then
+        return false
+    end
+    -- Arkane Intelligenz bringt Klassen ohne Mana nichts
+    if ns.class == "MAGE" then
+        local _, class = UnitClass(u)
+        if class == "WARRIOR" or class == "ROGUE" then return false end
+    end
+    for _, name in ipairs(buff.names) do
+        if HasBuff(u, name) then return false end
+    end
+    return true
+end
+
 -- Fehlender Klassenbuff: anklickbares Icon, nur außerhalb des Kampfes
 local function UpdateBuffButton(b)
     if InCombatLockdown() then return end
-    local buff, u = ns.classBuff, b.unit
-    local show = false
-    if buff and b.kind ~= "pet" and C_UnitAuras and UnitExists(u) and UnitIsConnected(u)
-        and not UnitIsDeadOrGhost(u) and UnitIsVisible(u) then
-        show = true
-        for _, name in ipairs(buff.names) do
-            if HasBuff(u, name) then show = false break end
-        end
-    end
+    local show = NeedsBuff(b)
     if show then
+        local buff = ns.classBuff
         if b.buffBtn.spell ~= buff.cast then
             b.buffBtn.spell = buff.cast
             b.buffBtn:SetAttribute("spell", buff.cast)
@@ -144,6 +200,83 @@ local function UpdateBuffButton(b)
         end
     end
     b.buffBtn:SetShown(show)
+end
+
+-- Sammel-Knopf: jeder Klick bufft den Nächsten, dem der Klassenbuff fehlt.
+-- Nach jedem Klick geht es beim Folgenden weiter, damit ein Fehlschlag
+-- (Sichtlinie o. Ä.) die Runde nicht blockiert.
+local buffAll
+local buffAllIndex = 0
+
+local function UpdateBuffAll()
+    if not buffAll or InCombatLockdown() then return end
+    local buff = ns.classBuff
+    local count, pick, first = 0, nil, nil
+    if buff then
+        for i, b in ipairs(buttons) do
+            if b:IsVisible() and b.buffBtn:IsShown() then
+                count = count + 1
+                local inRange, checked = UnitInRange(b.unit)
+                local reachable = b.unit == "player" or issecret(inRange) or issecret(checked) or not checked or inRange
+                if reachable then
+                    first = first or i
+                    if not pick and i > buffAllIndex then pick = i end
+                end
+            end
+        end
+    end
+    pick = pick or first
+    if not pick then
+        buffAll.pick = nil
+        buffAll:Hide()
+        return
+    end
+    local unit = buttons[pick].unit
+    if buffAll.unit ~= unit or buffAll.spell ~= buff.cast then
+        buffAll.unit, buffAll.spell = unit, buff.cast
+        buffAll:SetAttribute("unit", unit)
+        buffAll:SetAttribute("spell", buff.cast)
+        buffAll.icon:SetTexture(buff.icon)
+    end
+    buffAll.pick = pick
+    buffAll.count:SetText(count)
+    buffAll:Show()
+end
+
+local function CreateBuffAll(parent)
+    buffAll = CreateFrame("Button", "HealbuddyBuffAll", parent, "SecureActionButtonTemplate")
+    buffAll:SetSize(22, 22)
+    buffAll:SetPoint("BOTTOMLEFT", parent, "BOTTOMRIGHT", 3, 0)
+    buffAll:SetAttribute("type", "spell")
+    buffAll:SetAttribute("useOnKeyDown", false)
+    buffAll:RegisterForClicks("AnyUp")
+    local edge = buffAll:CreateTexture(nil, "BACKGROUND")
+    edge:SetPoint("TOPLEFT", -1, 1)
+    edge:SetPoint("BOTTOMRIGHT", 1, -1)
+    edge:SetColorTexture(0, 0, 0, 1)
+    buffAll.icon = buffAll:CreateTexture(nil, "ARTWORK")
+    buffAll.icon:SetAllPoints()
+    buffAll.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    local hl = buffAll:CreateTexture(nil, "HIGHLIGHT")
+    hl:SetAllPoints()
+    hl:SetColorTexture(1, 1, 1, 0.3)
+    buffAll.count = buffAll:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
+    buffAll.count:SetPoint("BOTTOMRIGHT", 1, 0)
+    buffAll:SetScript("PostClick", function(self)
+        if self.pick then buffAllIndex = self.pick end
+        ns.Safe(UpdateBuffAll)
+    end)
+    buffAll:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine("Alle buffen")
+        if self.unit then
+            GameTooltip:AddLine((self.spell or "") .. " fehlt bei " .. self.count:GetText() .. " Spieler(n)", 1, 1, 1)
+            GameTooltip:AddDoubleLine("Nächster Klick:", UnitName(self.unit) or "", 0.7, 0.7, 0.7, 1, 1, 1)
+        end
+        GameTooltip:Show()
+    end)
+    buffAll:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    buffAll:Hide()
 end
 
 local function UpdateAuras(b)
@@ -154,7 +287,7 @@ local function UpdateAuras(b)
     -- Eigene kurze Buffs (HoTs, Schilde)
     local shown = 0
     for i = 1, 40 do
-        if shown >= MAX_BUFFS then break end
+        if shown >= b.maxIcons then break end
         local aura = get(u, i, "HELPFUL|PLAYER")
         if not aura then break end
         local d = aura.duration
@@ -168,7 +301,7 @@ local function UpdateAuras(b)
     -- Debuffs: bannbare zuerst, sonst die ersten schädlichen
     shown = 0
     local dispelColor
-    for i = 1, MAX_DEBUFFS do
+    for i = 1, b.maxIcons do
         local aura = get(u, i, "HARMFUL|RAID")
         if not aura then break end
         shown = shown + 1
@@ -179,7 +312,7 @@ local function UpdateAuras(b)
         end
     end
     if shown == 0 then
-        for i = 1, MAX_DEBUFFS do
+        for i = 1, b.maxIcons do
             local aura = get(u, i, "HARMFUL")
             if not aura then break end
             shown = shown + 1
@@ -334,6 +467,7 @@ end
 -- Anordnung
 ---------------------------------------------------------------------------
 local function SetPos(b, col, row)
+    b.col, b.row = col, row
     b:ClearAllPoints()
     b:SetPoint("TOPLEFT", container, "TOPLEFT", col * (BW + GAP), -(HANDLE + GAP) - row * (BH + GAP))
 end
@@ -395,6 +529,56 @@ local function CreateAuraIcon(parent, size)
     return ic
 end
 
+-- Alles, was vom Skin abhängt (Größe, Textur, Farben, Platz für Icons).
+-- Verändert geschützte Frames, darf also nur außerhalb des Kampfes laufen.
+local function StyleButton(b)
+    local file = TextureFile()
+    local low = BH < 36
+    local size = low and 11 or 13
+    b.bar:SetStatusBarTexture(file)
+    b.pred:SetStatusBarTexture(file)
+    b.pred:SetWidth(BW - 2)
+    if ns.db.colorMode == "dark" then
+        b.bg:SetColorTexture(0.38, 0.07, 0.07, 1) -- fehlendes Leben fällt rot auf
+    else
+        b.bg:SetColorTexture(0.08, 0.08, 0.08, 1)
+    end
+
+    -- Niedrige Frames: Prozent neben den Namen statt in die Mitte
+    b.name:ClearAllPoints()
+    b.name:SetPoint("TOPLEFT", 3, -3)
+    b.name:SetPoint("TOPRIGHT", (low and ns.db.percent) and -46 or -16, -3)
+    b.status:ClearAllPoints()
+    if low then
+        b.status:SetPoint("TOPRIGHT", -16, -3)
+    else
+        b.status:SetPoint("CENTER", 0, -1)
+    end
+
+    -- Schmale Frames zeigen weniger Icons, damit sich Buffs und Debuffs nicht überlappen
+    b.maxIcons = math.max(1, math.min(MAX_BUFFS, math.floor((BW - 6) / 2 / (size + 1))))
+    for i = 1, MAX_BUFFS do
+        local ic = b.buffs[i]
+        ic:SetSize(size, size)
+        ic:ClearAllPoints()
+        ic:SetPoint("BOTTOMLEFT", 2 + (i - 1) * (size + 1), 2)
+    end
+    for i = 1, MAX_DEBUFFS do
+        local ic = b.debuffs[i]
+        ic:SetSize(size, size)
+        ic:ClearAllPoints()
+        ic:SetPoint("BOTTOMRIGHT", -2 - (i - 1) * (size + 1), 2)
+    end
+
+    b.buffBtn:SetSize(12, 12)
+    b.buffBtn:ClearAllPoints()
+    if low then
+        b.buffBtn:SetPoint("CENTER", b, "CENTER", 0, 0)
+    else
+        b.buffBtn:SetPoint("RIGHT", b, "RIGHT", -3, 1)
+    end
+end
+
 local function CreateUnitButton(unit, kind, col, row, driver)
     local index = #buttons + 1
     local b = CreateFrame("Button", "HealbuddyUnit" .. index, container, "SecureUnitButtonTemplate")
@@ -416,9 +600,8 @@ local function CreateUnitButton(unit, kind, col, row, driver)
     if content.SetClipsChildren then content:SetClipsChildren(true) end
     b.content = content
 
-    local bg = content:CreateTexture(nil, "BACKGROUND")
-    bg:SetAllPoints()
-    bg:SetColorTexture(0.08, 0.08, 0.08, 1)
+    b.bg = content:CreateTexture(nil, "BACKGROUND")
+    b.bg:SetAllPoints()
 
     b.bar = CreateFrame("StatusBar", nil, content)
     b.bar:SetAllPoints()
@@ -519,6 +702,7 @@ local function CreateUnitButton(unit, kind, col, row, driver)
     hl:SetAllPoints()
     hl:SetColorTexture(1, 1, 1, 0.15)
 
+    StyleButton(b)
     b:SetScript("OnShow", UpdateAll)
     b:SetScript("PreClick", function(self)
         clicked, clickTime = self, GetTime()
@@ -565,6 +749,38 @@ function ns.ApplyScale()
     ns.AfterCombat(DoScale)
 end
 
+local function DoSkin()
+    BW, BH = ns.db.width, ns.db.height
+    container:SetSize(BW, HANDLE)
+    for _, b in ipairs(buttons) do
+        b:SetSize(BW, BH)
+        SetPos(b, b.col, b.row)
+        StyleButton(b)
+    end
+    DoLayout()
+    for _, b in ipairs(buttons) do
+        if b:IsVisible() then UpdateAll(b) end
+    end
+end
+
+function ns.ApplySkin()
+    if container then ns.AfterCombat(DoSkin) end
+end
+
+-- Voreinstellung übernehmen
+function ns.SetSkin(value)
+    for _, skin in ipairs(ns.SKINS) do
+        if skin.value == value then
+            local db = ns.db
+            db.preset = value
+            db.width, db.height = skin.width, skin.height
+            db.texture, db.colorMode, db.percent = skin.texture, skin.colorMode, skin.percent
+            ns.ApplySkin()
+            return
+        end
+    end
+end
+
 local unitEvents = {
     UNIT_HEALTH = UpdateHealth,
     UNIT_MAXHEALTH = UpdateHealth,
@@ -582,6 +798,7 @@ local otherEvents = {
 }
 
 function ns.CreateFrames()
+    BW, BH = ns.db.width, ns.db.height
     container = CreateFrame("Frame", "HealbuddyFrame", UIParent)
     container:SetSize(BW, HANDLE)
     container:SetMovable(true)
@@ -618,6 +835,7 @@ function ns.CreateFrames()
     end)
     handle:SetScript("OnLeave", function() GameTooltip:Hide() end)
     ns.UpdateLock()
+    CreateBuffAll(container)
 
     -- Gruppe: Spieler + party1-4 untereinander, Begleiter in der Spalte daneben
     CreateUnitButton("player", "player", 0, 0, "[group:raid] hide; show")
@@ -652,10 +870,14 @@ function ns.CreateFrames()
                 clicked = nil
             end
         elseif event == "READY_CHECK" or event == "READY_CHECK_CONFIRM" then
+            if event == "READY_CHECK" then readyRound = readyRound + 1 end
             readyCheck = true
             ForVisible(UpdateCenter)
         elseif event == "READY_CHECK_FINISHED" then
+            -- Ergebnis noch kurz stehen lassen, außer es läuft schon der nächste Check
+            local round = readyRound
             C_Timer.After(6, function()
+                if round ~= readyRound then return end
                 readyCheck = false
                 ForVisible(UpdateCenter)
             end)
@@ -664,6 +886,7 @@ function ns.CreateFrames()
         elseif event == "PLAYER_REGEN_DISABLED" then
             -- Letzte Gelegenheit vor der Kampfsperre
             for _, b in ipairs(buttons) do b.buffBtn:Hide() end
+            buffAll:Hide()
         elseif event == "PLAYER_REGEN_ENABLED" then
             ForVisible(UpdateBuffButton)
         else
@@ -676,5 +899,8 @@ function ns.CreateFrames()
         end
     end)
 
-    C_Timer.NewTicker(0.3, function() ForVisible(UpdateRange) end)
+    C_Timer.NewTicker(0.3, function()
+        ForVisible(UpdateRange)
+        ns.Safe(UpdateBuffAll)
+    end)
 end

@@ -181,14 +181,27 @@ local function RefreshRow(row)
     end
 end
 
+local currentPage = "bind"
+local pages, pageTabs, look
+
 function ns.RefreshOptions()
     if not options or not options:IsShown() then return end
+    for key, page in pairs(pages) do page:SetShown(key == currentPage) end
+    for _, tab in ipairs(pageTabs) do
+        tab.bg:SetColorTexture(0.2, 0.6, 0.9, tab.page == currentPage and 0.6 or 0.12)
+    end
     for _, tab in ipairs(tabs) do
         tab.bg:SetColorTexture(0.2, 0.6, 0.9, tab.mod == currentMod and 0.6 or 0.12)
     end
     for _, row in ipairs(rows) do RefreshRow(row) end
     for _, check in ipairs(options.checks) do check:SetChecked(ns.db[check.key]) end
-    options.scaleText:SetFormattedText("Größe: %d%%", ns.db.scale * 100 + 0.5)
+    local db = ns.db
+    look.skin:Set(db.preset, "Eigene Einstellungen")
+    look.texture:Set(db.texture, db.texture)
+    look.color:Set(db.colorMode, db.colorMode)
+    look.width:SetText(db.width)
+    look.height:SetText(db.height)
+    look.scale:SetText(math.floor(db.scale * 100 + 0.5) .. "%")
 end
 
 local function Changed()
@@ -268,38 +281,50 @@ local function SmallButton(parent, text, width, onClick)
     return b
 end
 
-local function CreateOptions()
-    options = CreateFrame("Frame", "HealbuddyOptions", UIParent)
-    options:SetSize(560, 312)
-    options:SetPoint("CENTER")
-    options:SetFrameStrata("DIALOG")
-    options:EnableMouse(true)
-    options:SetMovable(true)
-    options:SetClampedToScreen(true)
-    options:RegisterForDrag("LeftButton")
-    options:SetScript("OnDragStart", options.StartMoving)
-    options:SetScript("OnDragStop", options.StopMovingOrSizing)
-    Flat(options, 0.06, 0.07, 0.09, 0.96)
-    table.insert(UISpecialFrames, "HealbuddyOptions")
+local function Label(parent, text, x, y)
+    local fs = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    fs:SetPoint("TOPLEFT", x, y - 5)
+    fs:SetText(text)
+    return fs
+end
 
-    local header = options:CreateTexture(nil, "BORDER")
-    header:SetPoint("TOPLEFT")
-    header:SetPoint("TOPRIGHT")
-    header:SetHeight(28)
-    header:SetColorTexture(0.1, 0.35, 0.5, 0.9)
-    local title = options:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    title:SetPoint("TOPLEFT", 12, -8)
-    title:SetText("Healbuddy")
-    local close = SmallButton(options, "X", 22, function() options:Hide() end)
-    close:SetPoint("TOPRIGHT", -3, -3)
+local function Check(parent, key, label, x, y, onChange)
+    local check = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
+    check.key = key
+    check:SetSize(24, 24)
+    check:SetPoint("TOPLEFT", x, y)
+    check:SetScript("OnClick", function(self)
+        ns.db[key] = self:GetChecked() and true or false
+        onChange()
+    end)
+    local text = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    text:SetPoint("LEFT", check, "RIGHT", 0, 0)
+    text:SetText(label)
+    table.insert(options.checks, check)
+end
 
-    -- Modifikator-Reiter
-    local modLabel = options:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    modLabel:SetPoint("TOPLEFT", 16, -45)
-    modLabel:SetText("Modifikator")
+-- Beschriftung, Wert und −/+ ; liefert den FontString für den Wert
+local function Stepper(parent, label, x, y, onStep)
+    Label(parent, label, x, y)
+    local minus = SmallButton(parent, "–", 22, function() onStep(-1) end)
+    minus:SetPoint("TOPLEFT", x + 84, y)
+    local value = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    value:SetPoint("LEFT", minus, "RIGHT", 0, 0)
+    value:SetWidth(44)
+    local plus = SmallButton(parent, "+", 22, function() onStep(1) end)
+    plus:SetPoint("LEFT", minus, "RIGHT", 44, 0)
+    return value
+end
+
+local function Clamp(value, low, high)
+    return math.min(high, math.max(low, value))
+end
+
+local function CreateBindPage(page)
+    Label(page, "Modifikator", 16, -40)
     tabs = {}
     for i, mod in ipairs(ns.MODS) do
-        local tab = SmallButton(options, mod.label, 70, function()
+        local tab = SmallButton(page, mod.label, 70, function()
             currentMod = mod.key
             ns.RefreshOptions()
         end)
@@ -308,7 +333,7 @@ local function CreateOptions()
         tabs[i] = tab
     end
 
-    local reset = SmallButton(options, "Standardbelegung", 120, function()
+    local reset = SmallButton(page, "Standardbelegung", 120, function()
         ns.AutoSetup(true)
         ns.RefreshOptions()
     end)
@@ -322,46 +347,112 @@ local function CreateOptions()
 
     rows = {}
     for i = 1, #ns.BUTTONS do
-        rows[i] = CreateRow(options, i, -74 - (i - 1) * 28)
+        rows[i] = CreateRow(page, i, -74 - (i - 1) * 28)
     end
 
-    -- Fußzeile
-    options.checks = {}
-    local function Check(key, label, x, y, onChange)
-        local check = CreateFrame("CheckButton", nil, options, "UICheckButtonTemplate")
-        check.key = key
-        check:SetSize(24, 24)
-        check:SetPoint("BOTTOMLEFT", x, y)
-        check:SetScript("OnClick", function(self)
-            ns.db[key] = self:GetChecked() and true or false
-            onChange()
-        end)
-        local text = options:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        text:SetPoint("LEFT", check, "RIGHT", 0, 0)
-        text:SetText(label)
-        table.insert(options.checks, check)
-    end
-    Check("context", "Tote per Heil-Klick wiederbeleben (außerhalb des Kampfes)", 12, 58, function()
+    Check(page, "context", "Tote per Heil-Klick wiederbeleben (außerhalb des Kampfes)", 12, -220, function()
         if ns.db.context and not ns.resName then
             ns.Print("Deine Klasse hat keinen passenden Wiederbelebungszauber gelernt.")
         end
         Changed()
     end)
-    Check("fsr", "Manabalken mit 5-Sek-Regel und Ticks", 12, 34, ns.UpdateFSR)
-    Check("pets", "Begleiter anzeigen (Gruppe)", 300, 34, ns.UpdatePets)
-    Check("locked", "Position fixieren (Titelleiste ausblenden)", 12, 10, ns.UpdateLock)
+end
 
-    local function Scale(delta)
-        ns.db.scale = math.min(2, math.max(0.5, math.floor((ns.db.scale + delta) * 10 + 0.5) / 10))
+local function CreateLookPage(page)
+    look = {}
+    -- Jede Einzeländerung macht aus der Voreinstellung "Eigene Einstellungen"
+    local function Custom()
+        ns.db.preset = "custom"
+        ns.ApplySkin()
+        ns.RefreshOptions()
+        if InCombatLockdown() then ns.Print("Änderung wird nach dem Kampf aktiv.") end
+    end
+
+    Label(page, "Skin", 16, -44)
+    look.skin = CreateDropdown(page, 170, function() return ns.SKINS end, function(value)
+        ns.SetSkin(value)
+        ns.RefreshOptions()
+        if InCombatLockdown() then ns.Print("Änderung wird nach dem Kampf aktiv.") end
+    end)
+    look.skin:SetPoint("TOPLEFT", 100, -44)
+
+    Label(page, "Balken", 16, -76)
+    look.texture = CreateDropdown(page, 170, function() return ns.TEXTURES end, function(value)
+        ns.db.texture = value
+        Custom()
+    end)
+    look.texture:SetPoint("TOPLEFT", 100, -76)
+
+    Label(page, "Farbe", 290, -76)
+    look.color = CreateDropdown(page, 200, function() return ns.COLORS end, function(value)
+        ns.db.colorMode = value
+        Custom()
+    end)
+    look.color:SetPoint("TOPLEFT", 340, -76)
+
+    local size = ns.SIZE
+    look.width = Stepper(page, "Breite", 16, -108, function(dir)
+        ns.db.width = Clamp(ns.db.width + dir * size.step, size.minW, size.maxW)
+        Custom()
+    end)
+    look.height = Stepper(page, "Höhe", 290, -108, function(dir)
+        ns.db.height = Clamp(ns.db.height + dir * size.step, size.minH, size.maxH)
+        Custom()
+    end)
+    look.scale = Stepper(page, "Gesamtgröße", 16, -140, function(dir)
+        ns.db.scale = Clamp(math.floor((ns.db.scale + dir * 0.1) * 10 + 0.5) / 10, 0.5, 2)
         ns.ApplyScale()
         ns.RefreshOptions()
+    end)
+
+    Check(page, "percent", "Lebenspunkte in Prozent anzeigen", 286, -139, Custom)
+    Check(page, "fsr", "Manabalken mit 5-Sek-Regel und Ticks", 12, -172, ns.UpdateFSR)
+    Check(page, "pets", "Begleiter anzeigen (Gruppe)", 286, -172, ns.UpdatePets)
+    Check(page, "locked", "Position fixieren (Titelleiste ausblenden)", 12, -198, ns.UpdateLock)
+end
+
+local function CreateOptions()
+    options = CreateFrame("Frame", "HealbuddyOptions", UIParent)
+    options:SetSize(560, 256)
+    options:SetPoint("CENTER")
+    options:SetFrameStrata("DIALOG")
+    options:EnableMouse(true)
+    options:SetMovable(true)
+    options:SetClampedToScreen(true)
+    options:RegisterForDrag("LeftButton")
+    options:SetScript("OnDragStart", options.StartMoving)
+    options:SetScript("OnDragStop", options.StopMovingOrSizing)
+    Flat(options, 0.06, 0.07, 0.09, 0.96)
+    table.insert(UISpecialFrames, "HealbuddyOptions")
+    options.checks = {}
+
+    local header = options:CreateTexture(nil, "BORDER")
+    header:SetPoint("TOPLEFT")
+    header:SetPoint("TOPRIGHT")
+    header:SetHeight(28)
+    header:SetColorTexture(0.1, 0.35, 0.5, 0.9)
+    local title = options:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOPLEFT", 12, -8)
+    title:SetText("Healbuddy")
+    local close = SmallButton(options, "X", 22, function() options:Hide() end)
+    close:SetPoint("TOPRIGHT", -3, -3)
+
+    -- Seiten: Belegung | Aussehen
+    pages, pageTabs = {}, {}
+    for i, def in ipairs({ { "bind", "Belegung" }, { "look", "Aussehen" } }) do
+        local page = CreateFrame("Frame", nil, options)
+        page:SetAllPoints()
+        pages[def[1]] = page
+        local tab = SmallButton(options, def[2], 80, function()
+            currentPage = def[1]
+            ns.RefreshOptions()
+        end)
+        tab.page = def[1]
+        tab:SetPoint("TOPLEFT", 100 + (i - 1) * 84, -3)
+        pageTabs[i] = tab
     end
-    local plus = SmallButton(options, "+", 22, function() Scale(0.1) end)
-    plus:SetPoint("BOTTOMRIGHT", -14, 11)
-    local minus = SmallButton(options, "–", 22, function() Scale(-0.1) end)
-    minus:SetPoint("RIGHT", plus, "LEFT", -4, 0)
-    options.scaleText = options:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    options.scaleText:SetPoint("RIGHT", minus, "LEFT", -8, 0)
+    CreateBindPage(pages.bind)
+    CreateLookPage(pages.look)
 
     options:SetScript("OnShow", ns.RefreshOptions)
 end
