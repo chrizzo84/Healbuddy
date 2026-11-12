@@ -98,6 +98,7 @@ local CLASS_DEFAULTS = {
         { "ctrl-", 1, 475 },              -- Geringen Fluch aufheben
     },
 }
+ns.CLASS_DEFAULTS = CLASS_DEFAULTS
 local RES = { PRIEST = 2006, PALADIN = 7328, SHAMAN = 2008 }
 -- Klassenbuff: Einzelbuff zuerst (wird beim Klick gewirkt), danach Gruppenversion
 local CLASS_BUFF = {
@@ -344,6 +345,8 @@ SlashCmdList["HEALBUDDY"] = function(msg)
         if ns.RefreshOptions then ns.RefreshOptions() end
     elseif msg == "reset" then
         ns.ResetPosition()
+    elseif msg == "test" then
+        ns.Safe(ns.RunTest)
     elseif msg == "ticks" then
         ns.FSRDebug()
     else

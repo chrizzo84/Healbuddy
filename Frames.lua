@@ -7,6 +7,7 @@ local BAR = "Interface\\TargetingFrame\\UI-StatusBar"
 
 local container, handle
 local buttons, byUnit = {}, {}
+ns.buttons = buttons
 local readyCheck = false
 local clicked, clickTime
 
@@ -99,6 +100,18 @@ local function SetAuraIcon(ic, unit, aura)
     ic:Show()
 end
 
+-- Rahmen: bannbarer Debuff (Farbe des Typs) vor Aggro (rot) vor normal (schwarz)
+local function UpdateBorder(b)
+    local c = b.dispelColor
+    if c then
+        b.border:SetColorTexture(c.r, c.g, c.b, 1)
+    elseif b.hasAggro then
+        b.border:SetColorTexture(1, 0.1, 0.1, 1)
+    else
+        b.border:SetColorTexture(0, 0, 0, 1)
+    end
+end
+
 local function HasBuff(unit, name)
     if C_UnitAuras.GetAuraDataBySpellName then
         return C_UnitAuras.GetAuraDataBySpellName(unit, name, "HELPFUL") ~= nil
@@ -175,11 +188,8 @@ local function UpdateAuras(b)
     end
     for i = shown + 1, MAX_DEBUFFS do b.debuffs[i]:Hide() end
 
-    if dispelColor then
-        b.border:SetColorTexture(dispelColor.r, dispelColor.g, dispelColor.b, 1)
-    else
-        b.border:SetColorTexture(0, 0, 0, 1)
-    end
+    b.dispelColor = dispelColor
+    UpdateBorder(b)
 
     UpdateBuffButton(b)
 end
@@ -196,7 +206,9 @@ end
 
 local function UpdateThreat(b)
     local s = UnitThreatSituation and UnitThreatSituation(b.unit)
-    b.aggro:SetShown(s ~= nil and not issecret(s) and s >= 2)
+    b.hasAggro = s ~= nil and not issecret(s) and s >= 2
+    b.aggro:SetShown(b.hasAggro)
+    UpdateBorder(b)
 end
 
 local READY_TEX = {
@@ -248,6 +260,8 @@ local function UpdateAll(b)
     ns.Safe(UpdateCenter, b)
     ns.Safe(UpdateRange, b)
 end
+
+ns.UpdateAll = UpdateAll
 
 local function ForVisible(func)
     for _, b in ipairs(buttons) do
@@ -392,7 +406,8 @@ local function CreateUnitButton(unit, kind, col, row, driver)
     b:RegisterForClicks("AnyUp")
 
     b.border = b:CreateTexture(nil, "BACKGROUND")
-    b.border:SetAllPoints()
+    b.border:SetPoint("TOPLEFT", -1, 1)
+    b.border:SetPoint("BOTTOMRIGHT", 1, -1)
     b.border:SetColorTexture(0, 0, 0, 1)
 
     local content = CreateFrame("Frame", nil, b)

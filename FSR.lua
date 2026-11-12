@@ -164,6 +164,12 @@ function ns.CreateFSR(anchor)
     C_Timer.NewTicker(0.1, function() ns.Safe(OnMana) end)
 end
 
+function ns.FSRDemo()
+    if not bar then return end
+    endTime = GetTime() + DURATION
+    bar:Show()
+end
+
 function ns.UpdateFSR()
     if not bar then return end
     mana:SetShown(ns.db.fsr)
