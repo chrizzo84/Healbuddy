@@ -1,0 +1,14 @@
+## Interface: 16001
+## Title: |cff66ddffHealbuddy|r
+## Notes: Kompakte Heiler-Frames mit Click-Casting
+## Author: chrizzo
+## Version: 0.1.0
+## SavedVariables: HealbuddyDB
+## SavedVariablesPerCharacter: HealbuddyCharDB
+## IconTexture: Interface\Icons\Spell_Holy_FlashHeal
+## Category: Unit Frames
+
+Core.lua
+Frames.lua
+FSR.lua
+Options.lua
