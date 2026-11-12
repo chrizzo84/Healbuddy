@@ -113,28 +113,19 @@ local function TestBindings(button)
         count > 0 and (count .. " Tasten am Frame gesetzt; ob der Klick wirklich zaubert, bitte selbst prüfen") or "keine Belegung am Frame angekommen")
 end
 
-local function TestAuras(unit)
-    if not Has(C_UnitAuras, "GetAuraDataByIndex") then
-        return Line("Buff-/Debuff-Icons", BAD, "Aura-Funktionen fehlen")
+local function TestAuras(button)
+    if button.aurasReady then
+        Line("Buff-/Debuff-Icons", OK, "über Blizzard-Bausteine, auch im Kampf")
+        Line("Rahmenfarbe bei bannbaren Debuffs", OK, "über Blizzard-Baustein")
+    elseif button.manual then
+        Line("Buff-/Debuff-Icons", WARN, "Blizzard-Baustein nicht verfügbar, Icons nur außerhalb des Kampfes"
+            .. (ns.containerError and (" – " .. ns.containerError) or ""))
+    else
+        Line("Buff-/Debuff-Icons", WARN, "werden nach dem Kampf eingerichtet")
     end
-    local ok, aura = pcall(C_UnitAuras.GetAuraDataByIndex, unit, 1, "HELPFUL")
-    if not ok then
-        return Line("Buff-/Debuff-Icons", BAD, "Abfrage wirft einen Fehler")
-    end
-    if not aura then
-        return Line("Buff-/Debuff-Icons", WARN, "kein Buff auf dir zum Prüfen – mit einem Buff erneut testen")
-    end
-    local secretDuration = issecret(aura.duration)
-    local timer = not secretDuration or (Has(C_UnitAuras, "GetAuraDuration") and true)
-    Line("Buff-/Debuff-Icons", OK)
-    Line("Ablauf-Animation der Icons", timer and OK or BAD, not timer and "Dauer geheim und keine Ersatzfunktion" or nil)
-    Line("Filter kurzer eigener Buffs", secretDuration and WARN or OK,
-        secretDuration and "Dauer geheim: es werden auch lange eigene Buffs angezeigt" or nil)
-    Line("Farbe bannbarer Debuffs", issecret(aura.dispelName) and WARN or OK,
-        issecret(aura.dispelName) and "Typ geheim: Rahmen einheitlich pink" or nil)
-    local nameSecret = issecret(aura.name)
+    Line("Auren gerade gesperrt", OK, ns.AurasSecret() and "ja" or "nein")
     if ns.classBuff then
-        Line("Erkennung fehlender Buffs", (nameSecret and not Has(C_UnitAuras, "GetAuraDataBySpellName")) and BAD or OK)
+        Line("Erkennung fehlender Buffs", OK, "nur außerhalb des Kampfes")
     end
 end
 
@@ -212,7 +203,7 @@ function ns.RunTest()
     ns.Safe(TestHealth, button.unit, button.bar)
     ns.Safe(TestSpells)
     ns.Safe(TestBindings, button)
-    ns.Safe(TestAuras, button.unit)
+    ns.Safe(TestAuras, button)
     ns.Safe(TestStatus, button.unit, other)
     ns.Safe(Demo, button)
 

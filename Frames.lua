@@ -28,6 +28,19 @@ ns.SKINS = {
 }
 ns.SIZE = { minW = 56, maxW = 160, minH = 24, maxH = 60, step = 4 }
 
+-- Im Kampf (und in Begegnungen/PvP) sind Buffs und Debuffs für Addons gesperrt.
+-- Jeder direkte Zugriff wirft dann einen Fehler, also vorher fragen.
+local function AurasSecret()
+    return (C_Secrets and C_Secrets.ShouldAurasBeSecret and C_Secrets.ShouldAurasBeSecret()) and true or false
+end
+ns.AurasSecret = AurasSecret
+
+local function IconSize()
+    return BH < 36 and 11 or 13
+end
+
+local EnsureAuras -- weiter unten definiert
+
 local function TextureFile()
     for _, t in ipairs(ns.TEXTURES) do
         if t.value == ns.db.texture then return t.file end
@@ -158,11 +171,14 @@ local function UpdateBorder(b)
 end
 
 local function HasBuff(unit, name)
+    -- Im Zweifel "hat den Buff": lieber kein Icon als ein falsches
     if C_UnitAuras.GetAuraDataBySpellName then
-        return C_UnitAuras.GetAuraDataBySpellName(unit, name, "HELPFUL") ~= nil
+        local ok, aura = pcall(C_UnitAuras.GetAuraDataBySpellName, unit, name, "HELPFUL")
+        return not ok or aura ~= nil
     end
     for i = 1, 40 do
-        local aura = C_UnitAuras.GetAuraDataByIndex(unit, i, "HELPFUL")
+        local ok, aura = pcall(C_UnitAuras.GetAuraDataByIndex, unit, i, "HELPFUL")
+        if not ok then return true end
         if not aura then return false end
         if issecret(aura.name) or aura.name == name then return true end
     end
@@ -172,6 +188,7 @@ end
 -- Fehlt der Einheit der eigene Klassenbuff? (nur außerhalb des Kampfes prüfbar)
 local function NeedsBuff(b)
     local buff, u = ns.classBuff, b.unit
+    if AurasSecret() then return false end
     if not (buff and b.kind ~= "pet" and C_UnitAuras and UnitExists(u) and UnitIsConnected(u)
         and not UnitIsDeadOrGhost(u) and UnitIsVisible(u)) then
         return false
@@ -279,10 +296,21 @@ local function CreateBuffAll(parent)
     buffAll:Hide()
 end
 
-local function UpdateAuras(b)
+-- Ersatzweg mit eigenen Icons. Wird nur benutzt, wenn der Blizzard-Baustein
+-- (AuraContainer) fehlt, und funktioniert dann nur außerhalb des Kampfes.
+local function UpdateManualAuras(b)
     local u = b.unit
-    if not (C_UnitAuras and C_UnitAuras.GetAuraDataByIndex) then return end
-    local get = C_UnitAuras.GetAuraDataByIndex
+    if AurasSecret() or not (C_UnitAuras and C_UnitAuras.GetAuraDataByIndex) then
+        for i = 1, MAX_BUFFS do b.buffs[i]:Hide() end
+        for i = 1, MAX_DEBUFFS do b.debuffs[i]:Hide() end
+        b.dispelColor = nil
+        UpdateBorder(b)
+        return
+    end
+    local function get(unit, index, filter)
+        local ok, aura = pcall(C_UnitAuras.GetAuraDataByIndex, unit, index, filter)
+        return ok and aura or nil
+    end
 
     -- Eigene kurze Buffs (HoTs, Schilde)
     local shown = 0
@@ -323,7 +351,11 @@ local function UpdateAuras(b)
 
     b.dispelColor = dispelColor
     UpdateBorder(b)
+end
 
+local function UpdateAuras(b)
+    EnsureAuras(b)
+    if b.manual then UpdateManualAuras(b) end
     UpdateBuffButton(b)
 end
 
@@ -529,6 +561,120 @@ local function CreateAuraIcon(parent, size)
     return ic
 end
 
+local function PlaceManualIcons(b, size)
+    for i = 1, MAX_BUFFS do
+        local ic = b.buffs[i]
+        ic:SetSize(size, size)
+        ic:ClearAllPoints()
+        ic:SetPoint("BOTTOMLEFT", 2 + (i - 1) * (size + 1), 2)
+    end
+    for i = 1, MAX_DEBUFFS do
+        local ic = b.debuffs[i]
+        ic:SetSize(size, size)
+        ic:ClearAllPoints()
+        ic:SetPoint("BOTTOMRIGHT", -2 - (i - 1) * (size + 1), 2)
+    end
+end
+
+---------------------------------------------------------------------------
+-- Buff-/Debuff-Icons über Blizzards AuraContainer
+--
+-- Der Client füllt diese Icons selbst, auch im Kampf, wenn Addons die Auren
+-- nicht lesen dürfen. Wir legen nur fest, welche Auren (Filter) und wie sie
+-- aussehen. Alles hier ist dem Forever-Quelltext (Blizzard_AuraContainer)
+-- nachgebaut und läuft in pcall, weil es im Spiel noch nicht erprobt ist.
+---------------------------------------------------------------------------
+local AURA_TEMPLATE = "CustomAuraContainerTemplate"
+
+-- Ein Icon mit Ablauf-Animation und Stapelzahl
+local function InitAuraFrame(frame, size)
+    frame:SetSize(size, size)
+    local tex = frame:CreateTexture(nil, "ARTWORK")
+    tex:SetAllPoints()
+    tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    pcall(frame.SetIcon, frame, tex)
+
+    local cd = CreateFrame("Cooldown", nil, frame, "CooldownFrameTemplate")
+    cd:SetAllPoints()
+    cd:SetReverse(true)
+    if cd.SetHideCountdownNumbers then cd:SetHideCountdownNumbers(true) end
+    pcall(frame.SetDurationCooldown, frame, cd)
+
+    local top = CreateFrame("Frame", nil, frame)
+    top:SetAllPoints()
+    top:SetFrameLevel(cd:GetFrameLevel() + 1)
+    local count = top:CreateFontString(nil, "OVERLAY", "NumberFontNormalSmall")
+    count:SetPoint("BOTTOMRIGHT", 2, -1)
+    pcall(frame.SetApplicationCount, frame, count, {})
+end
+
+-- Unsichtbarer "Slot" über dem ganzen Frame: erscheint nur bei einem Debuff,
+-- den man selbst bannen kann, und färbt dann den Rahmen in der Debuff-Farbe.
+local function InitDispelFrame(frame, anchor)
+    frame:ClearAllPoints()
+    frame:SetPoint("TOPLEFT", anchor, "TOPLEFT", -1, 1)
+    frame:SetPoint("BOTTOMRIGHT", anchor, "BOTTOMRIGHT", 1, -1)
+    local style = Enum.CustomAuraButtonDispelTypeTextureStyle
+    local options = style and { style = style.PreserveAsset, showWhenHarmful = true } or nil
+    local edges = {
+        { "TOPLEFT", "TOPRIGHT", nil, 2 }, { "BOTTOMLEFT", "BOTTOMRIGHT", nil, 2 },
+        { "TOPLEFT", "BOTTOMLEFT", 2, nil }, { "TOPRIGHT", "BOTTOMRIGHT", 2, nil },
+    }
+    for _, e in ipairs(edges) do
+        local tex = frame:CreateTexture(nil, "OVERLAY")
+        tex:SetColorTexture(1, 1, 1, 1)
+        tex:SetPoint(e[1])
+        tex:SetPoint(e[2])
+        if e[3] then tex:SetWidth(e[3]) else tex:SetHeight(e[4]) end
+        if options then pcall(frame.AddDispelTypeTexture, frame, tex, options) end
+    end
+end
+
+local function CreateContainers(b)
+    local size = IconSize()
+    local function init(frame) ns.Safe(InitAuraFrame, frame, size) end
+    local layout = { elementSpacing = 1 }
+
+    local buffs = CreateFrame("AuraContainer", nil, b.over, AURA_TEMPLATE)
+    buffs:SetPoint("BOTTOMLEFT", 2, 2)
+    buffs:SetUnit(b.unit)
+    -- Eigene kurze Buffs (HoTs, Schilde); maxDuration blendet Dauerbuffs aus
+    buffs:AddAuraGroup("buffs", "HELPFUL|PLAYER", {
+        maxFrameCount = b.maxIcons, initializeFrame = init, layout = layout,
+        candidateFilters = { maxDuration = 120 },
+    })
+
+    local debuffs = CreateFrame("AuraContainer", nil, b.over, AURA_TEMPLATE)
+    debuffs:SetPoint("BOTTOMRIGHT", -2, 2)
+    debuffs:SetUnit(b.unit)
+    debuffs:AddAuraGroup("debuffs", "HARMFUL", {
+        maxFrameCount = b.maxIcons, initializeFrame = init, layout = layout,
+    })
+
+    local dispel = CreateFrame("AuraContainer", nil, b.vis, AURA_TEMPLATE)
+    dispel:SetAllPoints(b.vis)
+    dispel:SetFrameLevel(b.over:GetFrameLevel() + 1)
+    dispel:SetUnit(b.unit)
+    -- HARMFUL|RAID = Debuffs, die der Spieler selbst bannen kann
+    dispel:AddAuraSlot("dispel", "HARMFUL|RAID", {
+        initializeFrame = function(frame) ns.Safe(InitDispelFrame, frame, b.vis) end,
+    })
+
+    b.auraBuffs, b.auraDebuffs, b.auraDispel = buffs, debuffs, dispel
+end
+
+-- Icon-Größe und -Anzahl an den Skin anpassen (nur außerhalb des Kampfes)
+local function StyleContainers(b, size)
+    local layout = { elementSpacing = 1, elementWidth = size, elementHeight = size }
+    for key, c in pairs({ buffs = b.auraBuffs, debuffs = b.auraDebuffs }) do
+        c:SetAuraGroupMaxFrameCount(key, b.maxIcons)
+        c:SetAuraGroupLayout(key, layout)
+        for i = 1, c:GetAuraGroupFrameCount(key) do
+            c:GetAuraGroupFrame(key, i):SetSize(size, size)
+        end
+    end
+end
+
 -- Alles, was vom Skin abhängt (Größe, Textur, Farben, Platz für Icons).
 -- Verändert geschützte Frames, darf also nur außerhalb des Kampfes laufen.
 local function StyleButton(b)
@@ -557,18 +703,8 @@ local function StyleButton(b)
 
     -- Schmale Frames zeigen weniger Icons, damit sich Buffs und Debuffs nicht überlappen
     b.maxIcons = math.max(1, math.min(MAX_BUFFS, math.floor((BW - 6) / 2 / (size + 1))))
-    for i = 1, MAX_BUFFS do
-        local ic = b.buffs[i]
-        ic:SetSize(size, size)
-        ic:ClearAllPoints()
-        ic:SetPoint("BOTTOMLEFT", 2 + (i - 1) * (size + 1), 2)
-    end
-    for i = 1, MAX_DEBUFFS do
-        local ic = b.debuffs[i]
-        ic:SetSize(size, size)
-        ic:ClearAllPoints()
-        ic:SetPoint("BOTTOMRIGHT", -2 - (i - 1) * (size + 1), 2)
-    end
+    if b.manual then PlaceManualIcons(b, size) end
+    if b.aurasReady then pcall(StyleContainers, b, size) end
 
     b.buffBtn:SetSize(12, 12)
     b.buffBtn:ClearAllPoints()
@@ -577,6 +713,35 @@ local function StyleButton(b)
     else
         b.buffBtn:SetPoint("RIGHT", b, "RIGHT", -3, 1)
     end
+end
+
+local function MakeManual(b)
+    b.buffs, b.debuffs = {}, {}
+    for i = 1, MAX_BUFFS do b.buffs[i] = CreateAuraIcon(b.over, 13) end
+    for i = 1, MAX_DEBUFFS do b.debuffs[i] = CreateAuraIcon(b.over, 13) end
+    PlaceManualIcons(b, IconSize())
+    b.manual = true
+end
+
+-- Legt die Aura-Anzeige eines Frames beim ersten Gebrauch an
+function EnsureAuras(b)
+    if b.aurasReady or b.manual then return end
+    if not ns.noContainers then
+        local ok, err = pcall(CreateContainers, b)
+        if ok then
+            b.aurasReady = true
+            return
+        end
+        -- Halb angelegte Bausteine stilllegen
+        for _, key in ipairs({ "auraBuffs", "auraDebuffs", "auraDispel" }) do
+            if b[key] then pcall(b[key].Hide, b[key]) b[key] = nil end
+        end
+        if InCombatLockdown() or AurasSecret() then
+            return -- im Kampf gescheitert: nach dem Kampf erneut versuchen
+        end
+        ns.noContainers, ns.containerError = true, tostring(err)
+    end
+    MakeManual(b)
 end
 
 local function CreateUnitButton(unit, kind, col, row, driver)
@@ -589,12 +754,21 @@ local function CreateUnitButton(unit, kind, col, row, driver)
     b:SetAttribute("useOnKeyDown", false)
     b:RegisterForClicks("AnyUp")
 
-    b.border = b:CreateTexture(nil, "BACKGROUND")
+    -- Der klickbare Button liegt über allem Sichtbaren. Sonst würden die
+    -- Aura-Icons des Clients (eigene, mausempfindliche Buttons) Klicks abfangen.
+    local base = container:GetFrameLevel()
+    b:SetFrameLevel(base + 30)
+    local vis = CreateFrame("Frame", nil, b)
+    vis:SetAllPoints()
+    vis:SetFrameLevel(base + 1)
+    b.vis = vis
+
+    b.border = vis:CreateTexture(nil, "BACKGROUND")
     b.border:SetPoint("TOPLEFT", -1, 1)
     b.border:SetPoint("BOTTOMRIGHT", 1, -1)
     b.border:SetColorTexture(0, 0, 0, 1)
 
-    local content = CreateFrame("Frame", nil, b)
+    local content = CreateFrame("Frame", nil, vis)
     content:SetPoint("TOPLEFT", 1, -1)
     content:SetPoint("BOTTOMRIGHT", -1, 1)
     if content.SetClipsChildren then content:SetClipsChildren(true) end
@@ -621,6 +795,7 @@ local function CreateUnitButton(unit, kind, col, row, driver)
     local over = CreateFrame("Frame", nil, content)
     over:SetAllPoints()
     over:SetFrameLevel(b.bar:GetFrameLevel() + 3)
+    b.over = over
 
     b.name = over:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     b.name:SetPoint("TOPLEFT", 3, -3)
@@ -648,18 +823,6 @@ local function CreateUnitButton(unit, kind, col, row, driver)
     b.aggro:SetPoint("BOTTOMLEFT", over, "LEFT", 2, -3)
     b.aggro:Hide()
 
-    b.buffs, b.debuffs = {}, {}
-    for i = 1, MAX_BUFFS do
-        local ic = CreateAuraIcon(over, 13)
-        ic:SetPoint("BOTTOMLEFT", 2 + (i - 1) * 14, 2)
-        b.buffs[i] = ic
-    end
-    for i = 1, MAX_DEBUFFS do
-        local ic = CreateAuraIcon(over, 13)
-        ic:SetPoint("BOTTOMRIGHT", -2 - (i - 1) * 14, 2)
-        b.debuffs[i] = ic
-    end
-
     -- Rotes Aufblinken, wenn ein Klick nichts bewirken konnte
     local flash = over:CreateTexture(nil, "OVERLAY", nil, 7)
     flash:SetAllPoints()
@@ -675,7 +838,7 @@ local function CreateUnitButton(unit, kind, col, row, driver)
     local bb = CreateFrame("Button", nil, b, "SecureActionButtonTemplate")
     bb:SetSize(14, 14)
     bb:SetPoint("RIGHT", b, "RIGHT", -3, -1)
-    bb:SetFrameLevel(over:GetFrameLevel() + 2)
+    bb:SetFrameLevel(b:GetFrameLevel() + 2)
     bb:SetAttribute("type", "spell")
     bb:SetAttribute("unit", unit)
     bb:SetAttribute("useOnKeyDown", false)
@@ -888,7 +1051,7 @@ function ns.CreateFrames()
             for _, b in ipairs(buttons) do b.buffBtn:Hide() end
             buffAll:Hide()
         elseif event == "PLAYER_REGEN_ENABLED" then
-            ForVisible(UpdateBuffButton)
+            ForVisible(UpdateAuras)
         else
             if event == "GROUP_ROSTER_UPDATE" or event == "PLAYER_ENTERING_WORLD" then
                 ns.AfterCombat(DoLayout)
