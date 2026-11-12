@@ -347,7 +347,7 @@ local function CreateOptions()
         end
         Changed()
     end)
-    Check("fsr", "5-Sekunden-Regel und Mana-Ticks anzeigen", 12, 34, ns.UpdateFSR)
+    Check("fsr", "Manabalken mit 5-Sek-Regel und Ticks", 12, 34, ns.UpdateFSR)
     Check("pets", "Begleiter anzeigen (Gruppe)", 300, 34, ns.UpdatePets)
     Check("locked", "Position fixieren (Titelleiste ausblenden)", 12, 10, ns.UpdateLock)
 
