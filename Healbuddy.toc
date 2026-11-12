@@ -11,4 +11,5 @@
 Core.lua
 Frames.lua
 FSR.lua
+Minimap.lua
 Options.lua

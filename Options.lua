@@ -187,12 +187,12 @@ function ns.RefreshOptions()
         tab.bg:SetColorTexture(0.2, 0.6, 0.9, tab.mod == currentMod and 0.6 or 0.12)
     end
     for _, row in ipairs(rows) do RefreshRow(row) end
-    options.lock:SetChecked(ns.db.locked)
-    options.fsr:SetChecked(ns.db.fsr)
+    for _, check in ipairs(options.checks) do check:SetChecked(ns.db[check.key]) end
     options.scaleText:SetFormattedText("Größe: %d%%", ns.db.scale * 100 + 0.5)
 end
 
 local function Changed()
+    ns.cdb.needSetup = nil
     ns.ApplyBindings()
     ns.RefreshOptions()
     if InCombatLockdown() then ns.Print("Änderung wird nach dem Kampf aktiv.") end
@@ -235,13 +235,16 @@ local function CreateRow(parent, index, y)
         Changed()
     end)
 
-    row.rank = CreateDropdown(parent, 90, function()
+    row.rank = CreateDropdown(parent, 110, function()
         local items = {}
         local bind = ns.GetBinding(currentMod, index)
         local spell = bind.spell and ns.spells[bind.spell]
         if spell then
             for _, r in ipairs(spell.ranks) do
-                table.insert(items, { value = r.id, text = r.label, icon = spell.icon })
+                local cost = ns.ManaCost(r.id)
+                local text = r.label
+                if cost and cost > 0 then text = text .. "  |cff66aaff" .. cost .. "|r" end
+                table.insert(items, { value = r.id, text = text, icon = spell.icon })
             end
         end
         return items
@@ -267,7 +270,7 @@ end
 
 local function CreateOptions()
     options = CreateFrame("Frame", "HealbuddyOptions", UIParent)
-    options:SetSize(540, 296)
+    options:SetSize(560, 312)
     options:SetPoint("CENTER")
     options:SetFrameStrata("DIALOG")
     options:EnableMouse(true)
@@ -305,33 +308,48 @@ local function CreateOptions()
         tabs[i] = tab
     end
 
+    local reset = SmallButton(options, "Standardbelegung", 120, function()
+        ns.AutoSetup(true)
+        ns.RefreshOptions()
+    end)
+    reset:SetPoint("TOPRIGHT", -14, -40)
+    reset:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Belegung auf den Klassen-Standard zurücksetzen", 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    reset:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
     rows = {}
     for i = 1, #ns.BUTTONS do
         rows[i] = CreateRow(options, i, -74 - (i - 1) * 28)
     end
 
     -- Fußzeile
-    options.lock = CreateFrame("CheckButton", nil, options, "UICheckButtonTemplate")
-    options.lock:SetSize(24, 24)
-    options.lock:SetPoint("BOTTOMLEFT", 12, 10)
-    options.lock:SetScript("OnClick", function(self)
-        ns.db.locked = self:GetChecked() and true or false
-        ns.UpdateLock()
+    options.checks = {}
+    local function Check(key, label, x, y, onChange)
+        local check = CreateFrame("CheckButton", nil, options, "UICheckButtonTemplate")
+        check.key = key
+        check:SetSize(24, 24)
+        check:SetPoint("BOTTOMLEFT", x, y)
+        check:SetScript("OnClick", function(self)
+            ns.db[key] = self:GetChecked() and true or false
+            onChange()
+        end)
+        local text = options:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        text:SetPoint("LEFT", check, "RIGHT", 0, 0)
+        text:SetText(label)
+        table.insert(options.checks, check)
+    end
+    Check("context", "Tote per Heil-Klick wiederbeleben (außerhalb des Kampfes)", 12, 58, function()
+        if ns.db.context and not ns.resName then
+            ns.Print("Deine Klasse hat keinen passenden Wiederbelebungszauber gelernt.")
+        end
+        Changed()
     end)
-    local lockLabel = options:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    lockLabel:SetPoint("LEFT", options.lock, "RIGHT", 0, 0)
-    lockLabel:SetText("Position fixieren (Titelleiste ausblenden)")
-
-    options.fsr = CreateFrame("CheckButton", nil, options, "UICheckButtonTemplate")
-    options.fsr:SetSize(24, 24)
-    options.fsr:SetPoint("BOTTOMLEFT", options.lock, "TOPLEFT", 0, 0)
-    options.fsr:SetScript("OnClick", function(self)
-        ns.db.fsr = self:GetChecked() and true or false
-        ns.UpdateFSR()
-    end)
-    local fsrLabel = options:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    fsrLabel:SetPoint("LEFT", options.fsr, "RIGHT", 0, 0)
-    fsrLabel:SetText("5-Sekunden-Regel anzeigen (Balken über den Frames)")
+    Check("fsr", "5-Sekunden-Regel und Mana-Ticks anzeigen", 12, 34, ns.UpdateFSR)
+    Check("pets", "Begleiter anzeigen (Gruppe)", 300, 34, ns.UpdatePets)
+    Check("locked", "Position fixieren (Titelleiste ausblenden)", 12, 10, ns.UpdateLock)
 
     local function Scale(delta)
         ns.db.scale = math.min(2, math.max(0.5, math.floor((ns.db.scale + delta) * 10 + 0.5) / 10))
