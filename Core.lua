@@ -181,7 +181,7 @@ f:SetScript("OnEvent", function(_, event, arg1)
     end
 end)
 
-SLASH_HEALBUDDY1 = "/hb"
+SLASH_HEALBUDDY1 = "/hbu"
 SLASH_HEALBUDDY2 = "/healbuddy"
 SlashCmdList["HEALBUDDY"] = function(msg)
     msg = (msg or ""):lower()
