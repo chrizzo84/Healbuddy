@@ -344,6 +344,8 @@ SlashCmdList["HEALBUDDY"] = function(msg)
         if ns.RefreshOptions then ns.RefreshOptions() end
     elseif msg == "reset" then
         ns.ResetPosition()
+    elseif msg == "ticks" then
+        ns.FSRDebug()
     else
         ns.ToggleOptions()
     end

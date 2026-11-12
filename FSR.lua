@@ -36,20 +36,38 @@ local function OnUpdate(self)
     end
 end
 
+-- Wird alle 0,1 s abgefragt (nicht per Event: je nach Client feuert
+-- UNIT_POWER_UPDATE bei reiner Regeneration nicht zuverlässig)
+local gains, lastInterval, secret = 0, nil, false
+
 local function OnMana()
     local cur, max = UnitPower("player", ns.MANA), UnitPowerMax("player", ns.MANA)
-    if issecret(cur) or issecret(max) then
+    secret = issecret(cur) or issecret(max)
+    if secret then
         lastMana, lastTick = nil, nil
         return
     end
     local now = GetTime()
     if lastMana and cur > lastMana then
-        if lastGain and now - lastGain < 1 then smooth = smooth + 1 end
+        lastInterval = lastGain and (now - lastGain) or nil
+        gains = gains + 1
+        -- Zuwächse in schneller Folge = fließende Regeneration, keine Ticks
+        if lastInterval and lastInterval < 1 then smooth = smooth + 1 else smooth = 0 end
         lastGain, lastTick = now, now
     end
     lastMana = cur
     full = cur >= max
-    if ns.db.fsr and lastTick and not full then bar:Show() end
+    if ns.db.fsr and lastTick and not full and not bar:IsShown() then bar:Show() end
+end
+
+function ns.FSRDebug()
+    if not bar then return ns.Print("Tickanzeige: für diese Klasse nicht aktiv.") end
+    if secret then
+        return ns.Print("Tickanzeige: Mana ist ein geheimer Wert – der Client lässt das Auslesen nicht zu.")
+    end
+    ns.Print(("Tickanzeige: Mana %s/%s, Zuwächse erkannt: %d, letzter Abstand: %s s, fließend-Zähler: %d, voll: %s, Option an: %s"):format(
+        tostring(lastMana), tostring(UnitPowerMax("player", ns.MANA)), gains,
+        lastInterval and ("%.2f"):format(lastInterval) or "-", smooth, tostring(full), tostring(ns.db.fsr)))
 end
 
 local function OnCast(spellID)
@@ -83,14 +101,10 @@ function ns.CreateFSR(anchor)
 
     local ev = CreateFrame("Frame")
     ev:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
-    ev:RegisterUnitEvent("UNIT_POWER_UPDATE", "player")
-    ev:SetScript("OnEvent", function(_, event, _, _, spellID)
-        if event == "UNIT_POWER_UPDATE" then
-            ns.Safe(OnMana)
-        elseif ns.db.fsr then
-            OnCast(spellID)
-        end
+    ev:SetScript("OnEvent", function(_, _, _, _, spellID)
+        if ns.db.fsr then OnCast(spellID) end
     end)
+    C_Timer.NewTicker(0.1, function() ns.Safe(OnMana) end)
 end
 
 function ns.UpdateFSR()
