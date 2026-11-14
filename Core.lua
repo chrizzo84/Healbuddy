@@ -120,6 +120,24 @@ local function IsHelpful(id, name)
     return nil
 end
 
+local function IsHarmful(id, name)
+    if C_Spell and C_Spell.IsSpellHarmful then return C_Spell.IsSpellHarmful(id) end
+    if IsHarmfulSpell then return IsHarmfulSpell(name) end
+    return nil
+end
+
+-- Zauber, die auf Freund UND Feind wirken: der Client führt sie oft nur als
+-- Schadenszauber. Sühne, Heiliger Schock, Magiebannung.
+local DUAL_IDS = { 47540, 20473, 527 }
+local function DualNames()
+    local names = {}
+    for _, id in ipairs(DUAL_IDS) do
+        local name = ns.SpellName(id)
+        if name then names[name] = true end
+    end
+    return names
+end
+
 local function Subtext(id, sub)
     if sub and sub ~= "" then return sub end
     if C_Spell and C_Spell.GetSpellSubtext then
@@ -184,6 +202,7 @@ end
 
 function ns.ScanSpells()
     local all, helpfulCount = {}, 0
+    local dual = DualNames()
     ScanSpellBook(function(name, id, icon, sub)
         if not name or not id then return end
         local entry = all[name]
@@ -198,6 +217,9 @@ function ns.ScanSpells()
         local helpful = IsHelpful(id, name)
         if helpful then entry.helpful = true end
         if helpful == nil then entry.unknown = true end
+        -- Weder Hilfs- noch Schadenszauber (z. B. ohne Ziel): ebenfalls anbieten
+        if not helpful and IsHarmful(id, name) == false then entry.neutral = true end
+        if dual[name] then entry.helpful = true end
         sub = Subtext(id, sub)
         local n = sub and tonumber(sub:match("%d+"))
         table.insert(entry.ranks, { id = id, sub = sub, n = n })
@@ -218,7 +240,7 @@ function ns.ScanSpells()
             r.label = (r.sub and r.sub ~= "") and r.sub or ("Rang " .. i)
         end
         -- Nur Hilfszauber; falls der Client das nicht verrät, alle aktiven Zauber
-        if e.helpful or e.unknown or helpfulCount == 0 then
+        if e.helpful or e.neutral or e.unknown or helpfulCount == 0 then
             spells[name] = e
             table.insert(list, e)
         end
@@ -226,6 +248,23 @@ function ns.ScanSpells()
     table.sort(list, function(a, b) return a.name < b.name end)
     ns.spells, ns.spellList, ns.known = spells, list, all
     UpdateClassData()
+end
+
+-- /hbu zauber <Name>: zeigt, warum ein Zauber (nicht) in der Auswahl steht
+function ns.SpellDebug(query)
+    local found = false
+    for name, e in pairs(ns.known) do
+        if name:lower():find(query, 1, true) then
+            found = true
+            local top = e.ranks[#e.ranks]
+            ns.Print(("%s: %d Rang/Ränge, ID %d, Hilfszauber: %s, Schadenszauber: %s, in der Auswahl: %s"):format(
+                name, #e.ranks, top.id, tostring(IsHelpful(top.id, name)), tostring(IsHarmful(top.id, name)),
+                ns.spells[name] and "ja" or "nein"))
+        end
+    end
+    if not found then
+        ns.Print("Kein aktiver Zauber mit \"" .. query .. "\" im Zauberbuch gefunden (passiv, nicht gelernt oder vom Client nicht gemeldet).")
+    end
 end
 
 ---------------------------------------------------------------------------
@@ -355,6 +394,8 @@ SlashCmdList["HEALBUDDY"] = function(msg)
         ns.Safe(ns.RunTest)
     elseif msg == "ticks" then
         ns.FSRDebug()
+    elseif msg:match("^zauber%s+%S") then
+        ns.Safe(ns.SpellDebug, msg:match("^zauber%s+(.-)%s*$"))
     else
         ns.ToggleOptions()
     end
