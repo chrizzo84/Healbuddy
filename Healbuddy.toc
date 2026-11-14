@@ -10,6 +10,7 @@
 ## Category: Unit Frames
 ## X-Website: https://github.com/chrizzo84/Healbuddy
 ## X-License: MIT
+## X-Curse-Project-ID: 1805977
 
 Locale.lua
 Core.lua
