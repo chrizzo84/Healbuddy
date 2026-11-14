@@ -1,4 +1,5 @@
 local _, ns = ...
+local L = ns.L
 local issecret = ns.issecret
 
 local BW, BH, GAP, HANDLE = 88, 40, 2, 14
@@ -9,21 +10,21 @@ local BAR = "Interface\\TargetingFrame\\UI-StatusBar"
 -- Skins: Voreinstellungen aus Größe, Balkentextur und Farbschema
 ---------------------------------------------------------------------------
 ns.TEXTURES = {
-    { value = "Standard", text = "Standard", file = BAR },
-    { value = "Glatt", text = "Glatt", file = "Interface\\Buttons\\WHITE8x8" },
+    { value = "Standard", text = L["Default"], file = BAR },
+    { value = "Glatt", text = L["Smooth"], file = "Interface\\Buttons\\WHITE8x8" },
     { value = "Blizzard", text = "Blizzard", file = "Interface\\RaidFrame\\Raid-Bar-Hp-Fill" },
-    { value = "Streifen", text = "Streifen", file = "Interface\\PaperDollInfoFrame\\UI-Character-Skills-Bar" },
+    { value = "Streifen", text = L["Striped"], file = "Interface\\PaperDollInfoFrame\\UI-Character-Skills-Bar" },
 }
 ns.COLORS = {
-    { value = "class", text = "Klassenfarbe" },
-    { value = "green", text = "Grün" },
-    { value = "dark", text = "Dunkel, Name in Klassenfarbe" },
+    { value = "class", text = L["Class color"] },
+    { value = "green", text = L["Green"] },
+    { value = "dark", text = L["Dark, name in class color"] },
 }
 ns.SKINS = {
-    { value = "Kompakt", text = "Kompakt", width = 88, height = 40, texture = "Standard", colorMode = "class", percent = true },
-    { value = "Dunkel", text = "Dunkel", width = 88, height = 40, texture = "Glatt", colorMode = "dark", percent = true },
-    { value = "Breit", text = "Breit", width = 132, height = 28, texture = "Standard", colorMode = "class", percent = true },
-    { value = "Minimal", text = "Minimal", width = 64, height = 32, texture = "Glatt", colorMode = "green", percent = false },
+    { value = "Kompakt", text = L["Compact"], width = 88, height = 40, texture = "Standard", colorMode = "class", percent = true },
+    { value = "Dunkel", text = L["Dark"], width = 88, height = 40, texture = "Glatt", colorMode = "dark", percent = true },
+    { value = "Breit", text = L["Wide"], width = 132, height = 28, texture = "Standard", colorMode = "class", percent = true },
+    { value = "Minimal", text = L["Minimal"], width = 64, height = 32, texture = "Glatt", colorMode = "green", percent = false },
     { value = "Blizzard", text = "Blizzard", width = 88, height = 40, texture = "Blizzard", colorMode = "green", percent = true },
 }
 ns.SIZE = { minW = 56, maxW = 160, minH = 24, maxH = 60, step = 4 }
@@ -99,12 +100,12 @@ local function UpdateHealth(b)
     end
     if not issecret(connected) and not connected then
         b.bar:SetMinMaxValues(0, 1); b.bar:SetValue(0)
-        b.status:SetText("Offline")
+        b.status:SetText(L["Offline"])
         UpdatePrediction(b, true)
         return
     elseif not issecret(dead) and dead then
         b.bar:SetMinMaxValues(0, 1); b.bar:SetValue(0)
-        b.status:SetText("|cffff5555Tot|r")
+        b.status:SetText("|cffff5555" .. L["Dead"] .. "|r")
         UpdatePrediction(b, true)
         return
     end
@@ -285,10 +286,10 @@ local function CreateBuffAll(parent)
     end)
     buffAll:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine("Alle buffen")
+        GameTooltip:AddLine(L["Buff all"])
         if self.unit then
-            GameTooltip:AddLine((self.spell or "") .. " fehlt bei " .. self.count:GetText() .. " Spieler(n)", 1, 1, 1)
-            GameTooltip:AddDoubleLine("Nächster Klick:", UnitName(self.unit) or "", 0.7, 0.7, 0.7, 1, 1, 1)
+            GameTooltip:AddLine(L["%s missing on %s player(s)"]:format(self.spell or "", self.count:GetText() or ""), 1, 1, 1)
+            GameTooltip:AddDoubleLine(L["Next click:"], UnitName(self.unit) or "", 0.7, 0.7, 0.7, 1, 1, 1)
         end
         GameTooltip:Show()
     end)
@@ -482,9 +483,9 @@ local function ShowTooltip(b)
             if bind and bind.kind == "spell" and bind.spell then
                 text = bind.max and bind.spell or ns.MacroSpell(bind)
             elseif bind and bind.kind == "target" then
-                text = "Anvisieren"
+                text = L["Target"]
             elseif bind and bind.kind == "menu" then
-                text = "Menü"
+                text = L["Menu"]
             end
             if text then
                 local key = (mod.key ~= "" and (mod.label .. " + ") or "") .. ns.BUTTONS[n]
@@ -853,8 +854,8 @@ local function CreateUnitButton(unit, kind, col, row, driver)
     bhl:SetColorTexture(1, 1, 1, 0.3)
     bb:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine((self.spell or "Buff") .. " fehlt")
-        GameTooltip:AddLine("Klicken zum Buffen", 1, 1, 1)
+        GameTooltip:AddLine(L["%s missing"]:format(self.spell or "Buff"))
+        GameTooltip:AddLine(L["Click to buff"], 1, 1, 1)
         GameTooltip:Show()
     end)
     bb:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -895,7 +896,7 @@ local function ApplyPosition()
 end
 
 function ns.ResetPosition()
-    if InCombatLockdown() then return ns.Print("Im Kampf nicht möglich.") end
+    if InCombatLockdown() then return ns.Print(L["Not possible in combat."]) end
     ns.db.pos = nil
     ApplyPosition()
 end
@@ -992,8 +993,8 @@ function ns.CreateFrames()
     handle:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:AddLine("Healbuddy")
-        GameTooltip:AddLine("Ziehen: verschieben", 1, 1, 1)
-        GameTooltip:AddLine("Rechtsklick: Einstellungen", 1, 1, 1)
+        GameTooltip:AddLine(L["Drag: move"], 1, 1, 1)
+        GameTooltip:AddLine(L["Right click: settings"], 1, 1, 1)
         GameTooltip:Show()
     end)
     handle:SetScript("OnLeave", function() GameTooltip:Hide() end)

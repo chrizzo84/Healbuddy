@@ -1,4 +1,5 @@
 local _, ns = ...
+local L = ns.L
 
 local options, rows, tabs
 local currentMod = ""
@@ -148,9 +149,9 @@ end
 ---------------------------------------------------------------------------
 local function ActionItems()
     local items = {
-        { value = "none", text = "|cff888888– nichts –|r" },
-        { value = "target", text = "Anvisieren", icon = "Interface\\Icons\\Ability_Hunter_SniperShot" },
-        { value = "menu", text = "Menü", icon = "Interface\\Icons\\INV_Misc_Note_01" },
+        { value = "none", text = "|cff888888" .. L["– nothing –"] .. "|r" },
+        { value = "target", text = L["Target"], icon = "Interface\\Icons\\Ability_Hunter_SniperShot" },
+        { value = "menu", text = L["Menu"], icon = "Interface\\Icons\\INV_Misc_Note_01" },
     }
     for _, s in ipairs(ns.spellList) do
         table.insert(items, { value = "spell:" .. s.name, text = s.name, icon = s.icon })
@@ -161,7 +162,7 @@ end
 local function RefreshRow(row)
     local bind = ns.GetBinding(currentMod, row.index)
     local isSpell = bind.kind == "spell" and bind.spell
-    row.action:Set(isSpell and ("spell:" .. bind.spell) or bind.kind, isSpell and (bind.spell .. " |cffff5555(nicht gelernt)|r") or nil)
+    row.action:Set(isSpell and ("spell:" .. bind.spell) or bind.kind, isSpell and (bind.spell .. " |cffff5555" .. L["(not learned)"] .. "|r") or nil)
 
     local spell = isSpell and ns.spells[bind.spell]
     local hasRanks = spell and #spell.ranks > 1
@@ -196,7 +197,7 @@ function ns.RefreshOptions()
     for _, row in ipairs(rows) do RefreshRow(row) end
     for _, check in ipairs(options.checks) do check:SetChecked(ns.db[check.key]) end
     local db = ns.db
-    look.skin:Set(db.preset, "Eigene Einstellungen")
+    look.skin:Set(db.preset, L["Custom settings"])
     look.texture:Set(db.texture, db.texture)
     look.color:Set(db.colorMode, db.colorMode)
     look.width:SetText(db.width)
@@ -208,7 +209,7 @@ local function Changed()
     ns.cdb.needSetup = nil
     ns.ApplyBindings()
     ns.RefreshOptions()
-    if InCombatLockdown() then ns.Print("Änderung wird nach dem Kampf aktiv.") end
+    if InCombatLockdown() then ns.Print(L["Change takes effect after combat."]) end
 end
 
 local function CreateRow(parent, index, y)
@@ -236,7 +237,7 @@ local function CreateRow(parent, index, y)
     row.max:SetPoint("LEFT", row.action, "RIGHT", 8, 0)
     row.maxLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     row.maxLabel:SetPoint("LEFT", row.max, "RIGHT", 0, 0)
-    row.maxLabel:SetText("Höchster Rang")
+    row.maxLabel:SetText(L["Highest rank"])
     row.max:SetScript("OnClick", function(self)
         local bind = ns.GetBinding(currentMod, index)
         bind.max = self:GetChecked() and true or false
@@ -321,7 +322,7 @@ local function Clamp(value, low, high)
 end
 
 local function CreateBindPage(page)
-    Label(page, "Modifikator", 16, -40)
+    Label(page, L["Modifier"], 16, -40)
     tabs = {}
     for i, mod in ipairs(ns.MODS) do
         local tab = SmallButton(page, mod.label, 70, function()
@@ -333,14 +334,14 @@ local function CreateBindPage(page)
         tabs[i] = tab
     end
 
-    local reset = SmallButton(page, "Standardbelegung", 120, function()
+    local reset = SmallButton(page, L["Default bindings"], 120, function()
         ns.AutoSetup(true)
         ns.RefreshOptions()
     end)
     reset:SetPoint("TOPRIGHT", -14, -40)
     reset:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Belegung auf den Klassen-Standard zurücksetzen", 1, 1, 1)
+        GameTooltip:AddLine(L["Reset bindings to the class defaults"], 1, 1, 1)
         GameTooltip:Show()
     end)
     reset:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -350,9 +351,9 @@ local function CreateBindPage(page)
         rows[i] = CreateRow(page, i, -74 - (i - 1) * 28)
     end
 
-    Check(page, "context", "Tote per Heil-Klick wiederbeleben (außerhalb des Kampfes)", 12, -220, function()
+    Check(page, "context", L["Resurrect the dead with heal clicks (out of combat)"], 12, -220, function()
         if ns.db.context and not ns.resName then
-            ns.Print("Deine Klasse hat keinen passenden Wiederbelebungszauber gelernt.")
+            ns.Print(L["Your class has not learned a suitable resurrection spell."])
         end
         Changed()
     end)
@@ -365,25 +366,25 @@ local function CreateLookPage(page)
         ns.db.preset = "custom"
         ns.ApplySkin()
         ns.RefreshOptions()
-        if InCombatLockdown() then ns.Print("Änderung wird nach dem Kampf aktiv.") end
+        if InCombatLockdown() then ns.Print(L["Change takes effect after combat."]) end
     end
 
-    Label(page, "Skin", 16, -44)
+    Label(page, L["Skin"], 16, -44)
     look.skin = CreateDropdown(page, 170, function() return ns.SKINS end, function(value)
         ns.SetSkin(value)
         ns.RefreshOptions()
-        if InCombatLockdown() then ns.Print("Änderung wird nach dem Kampf aktiv.") end
+        if InCombatLockdown() then ns.Print(L["Change takes effect after combat."]) end
     end)
     look.skin:SetPoint("TOPLEFT", 100, -44)
 
-    Label(page, "Balken", 16, -76)
+    Label(page, L["Bar"], 16, -76)
     look.texture = CreateDropdown(page, 170, function() return ns.TEXTURES end, function(value)
         ns.db.texture = value
         Custom()
     end)
     look.texture:SetPoint("TOPLEFT", 100, -76)
 
-    Label(page, "Farbe", 290, -76)
+    Label(page, L["Color"], 290, -76)
     look.color = CreateDropdown(page, 200, function() return ns.COLORS end, function(value)
         ns.db.colorMode = value
         Custom()
@@ -391,24 +392,24 @@ local function CreateLookPage(page)
     look.color:SetPoint("TOPLEFT", 340, -76)
 
     local size = ns.SIZE
-    look.width = Stepper(page, "Breite", 16, -108, function(dir)
+    look.width = Stepper(page, L["Width"], 16, -108, function(dir)
         ns.db.width = Clamp(ns.db.width + dir * size.step, size.minW, size.maxW)
         Custom()
     end)
-    look.height = Stepper(page, "Höhe", 290, -108, function(dir)
+    look.height = Stepper(page, L["Height"], 290, -108, function(dir)
         ns.db.height = Clamp(ns.db.height + dir * size.step, size.minH, size.maxH)
         Custom()
     end)
-    look.scale = Stepper(page, "Gesamtgröße", 16, -140, function(dir)
+    look.scale = Stepper(page, L["Overall scale"], 16, -140, function(dir)
         ns.db.scale = Clamp(math.floor((ns.db.scale + dir * 0.1) * 10 + 0.5) / 10, 0.5, 2)
         ns.ApplyScale()
         ns.RefreshOptions()
     end)
 
-    Check(page, "percent", "Lebenspunkte in Prozent anzeigen", 286, -139, Custom)
-    Check(page, "fsr", "Manabalken mit 5-Sek-Regel und Ticks", 12, -172, ns.UpdateFSR)
-    Check(page, "pets", "Begleiter anzeigen (Gruppe)", 286, -172, ns.UpdatePets)
-    Check(page, "locked", "Position fixieren (Titelleiste ausblenden)", 12, -198, ns.UpdateLock)
+    Check(page, "percent", L["Show health in percent"], 286, -139, Custom)
+    Check(page, "fsr", L["Mana bar with 5-second rule and ticks"], 12, -172, ns.UpdateFSR)
+    Check(page, "pets", L["Show pets (party)"], 286, -172, ns.UpdatePets)
+    Check(page, "locked", L["Lock position (hide title bar)"], 12, -198, ns.UpdateLock)
 end
 
 local function CreateOptions()
@@ -439,7 +440,7 @@ local function CreateOptions()
 
     -- Seiten: Belegung | Aussehen
     pages, pageTabs = {}, {}
-    for i, def in ipairs({ { "bind", "Belegung" }, { "look", "Aussehen" } }) do
+    for i, def in ipairs({ { "bind", L["Bindings"] }, { "look", L["Appearance"] } }) do
         local page = CreateFrame("Frame", nil, options)
         page:SetAllPoints()
         pages[def[1]] = page

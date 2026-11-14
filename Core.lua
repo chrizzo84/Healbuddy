@@ -1,11 +1,12 @@
 local addonName, ns = ...
+local L = ns.L
 
 -- Maustasten und Modifikatoren, die belegt werden können
-ns.BUTTONS = { "Linksklick", "Rechtsklick", "Mittelklick", "Maustaste 4", "Maustaste 5" }
+ns.BUTTONS = { L["Left click"], L["Right click"], L["Middle click"], L["Mouse button 4"], L["Mouse button 5"] }
 ns.MODS = {
-    { key = "", label = "Ohne" },
+    { key = "", label = L["None"] },
     { key = "shift-", label = "Shift" },
-    { key = "ctrl-", label = "Strg" },
+    { key = "ctrl-", label = L["Ctrl"] },
     { key = "alt-", label = "Alt" },
 }
 
@@ -22,7 +23,7 @@ function ns.Report(err)
     if reported[err] or reportCount >= 5 then return end
     reported[err] = true
     reportCount = reportCount + 1
-    DEFAULT_CHAT_FRAME:AddMessage("|cff66ddffHealbuddy|r Fehler: " .. err, 1, 0.4, 0.4)
+    DEFAULT_CHAT_FRAME:AddMessage("|cff66ddffHealbuddy|r " .. L["Error"] .. ": " .. err, 1, 0.4, 0.4)
 end
 
 function ns.Safe(func, ...)
@@ -237,7 +238,7 @@ function ns.ScanSpells()
             return a.id < b.id
         end)
         for i, r in ipairs(e.ranks) do
-            r.label = (r.sub and r.sub ~= "") and r.sub or ("Rang " .. i)
+            r.label = (r.sub and r.sub ~= "") and r.sub or L["Rank %d"]:format(i)
         end
         -- Nur Hilfszauber; falls der Client das nicht verrät, alle aktiven Zauber
         if e.helpful or e.neutral or e.unknown or helpfulCount == 0 then
@@ -257,13 +258,13 @@ function ns.SpellDebug(query)
         if name:lower():find(query, 1, true) then
             found = true
             local top = e.ranks[#e.ranks]
-            ns.Print(("%s: %d Rang/Ränge, ID %d, Hilfszauber: %s, Schadenszauber: %s, in der Auswahl: %s"):format(
+            ns.Print((L["%s: %d rank(s), ID %d, helpful: %s, harmful: %s, in the list: %s"]):format(
                 name, #e.ranks, top.id, tostring(IsHelpful(top.id, name)), tostring(IsHarmful(top.id, name)),
-                ns.spells[name] and "ja" or "nein"))
+                ns.spells[name] and L["yes"] or L["no"]))
         end
     end
     if not found then
-        ns.Print("Kein aktiver Zauber mit \"" .. query .. "\" im Zauberbuch gefunden (passiv, nicht gelernt oder vom Client nicht gemeldet).")
+        ns.Print(L["No active spell containing \"%s\" found in the spellbook (passive, not learned or not reported by the client)."]:format(query))
     end
 end
 
@@ -348,7 +349,7 @@ function ns.AutoSetup(force)
     -- Hat die Klasse Heilzauber, kennt sie aber noch nicht: später erneut versuchen
     cdb.needSetup = (def ~= nil and not any) or nil
     if ns.ApplyBindings then ns.ApplyBindings() end
-    if any then ns.Print("Startbelegung für deine Klasse gesetzt – ansehen/ändern mit /hbu.") end
+    if any then ns.Print(L["Default bindings for your class have been set – view/change them with /hbu."]) end
 end
 
 ---------------------------------------------------------------------------
@@ -394,8 +395,8 @@ SlashCmdList["HEALBUDDY"] = function(msg)
         ns.Safe(ns.RunTest)
     elseif msg == "ticks" then
         ns.FSRDebug()
-    elseif msg:match("^zauber%s+%S") then
-        ns.Safe(ns.SpellDebug, msg:match("^zauber%s+(.-)%s*$"))
+    elseif msg:match("^spell%s+%S") or msg:match("^zauber%s+%S") then
+        ns.Safe(ns.SpellDebug, msg:match("^%a+%s+(.-)%s*$"))
     else
         ns.ToggleOptions()
     end

@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Lua 5.1
+        run: sudo apt-get update && sudo apt-get install -y lua5.1
+      - name: Check Lua syntax
+        run: |
+          for f in *.lua; do
+            luac5.1 -p "$f"
+          done
+      - name: Check that every file in the TOC exists
+        run: |
+          grep -vE '^\s*(#|$)' Healbuddy.toc | tr -d '\r' | while read -r f; do
+            test -f "$f" || { echo "Missing file listed in TOC: $f"; exit 1; }
+          done

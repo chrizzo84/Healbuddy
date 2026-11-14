@@ -1,10 +1,11 @@
 local _, ns = ...
+local L = ns.L
 local issecret = ns.issecret
 
 -- /hbu test: prüft, was der Client hergibt, und zeigt 5 Sekunden lang alle
 -- Anzeigen am eigenen Frame. Geheime Werte werden nie ausgegeben (das würde
 -- einen Fehler werfen), nur ob sie geheim sind.
-local OK, WARN, BAD = "|cff55ff55OK|r", "|cffffcc33EINGESCHRÄNKT|r", "|cffff5555GEHT NICHT|r"
+local OK, WARN, BAD = "|cff55ff55OK|r", "|cffffcc33" .. L["LIMITED"] .. "|r", "|cffff5555" .. L["NOT WORKING"] .. "|r"
 local problems
 
 local function Line(label, state, detail)
@@ -31,30 +32,30 @@ local function TestHealth(unit, bar)
         probe:SetMinMaxValues(0, UnitHealthMax(unit))
         probe:SetValue(UnitHealth(unit))
     end)
-    Line("Lebensbalken", okBar and OK or BAD, not okBar and "Balken nimmt die Werte nicht an" or nil)
+    Line(L["Health bar"], okBar and OK or BAD, not okBar and L["bar does not accept the values"] or nil)
 
     local state = Probe(UnitHealth, unit)
     if state == "ok" then
-        Line("Lebenspunkte in Prozent", OK)
+        Line(L["Health in percent"], OK)
     elseif UnitHealthPercent and CurveConstants and CurveConstants.ScaleTo100
         and pcall(UnitHealthPercent, unit, true, CurveConstants.ScaleTo100) then
-        Line("Lebenspunkte in Prozent", OK, "Wert geheim, Anzeige über Client-Funktion")
+        Line(L["Health in percent"], OK, L["value is secret, shown via a client function"])
     else
-        Line("Lebenspunkte in Prozent", BAD, "Wert geheim und keine Ersatzfunktion")
+        Line(L["Health in percent"], BAD, L["value is secret and there is no fallback function"])
     end
 
     state = Probe(UnitIsDeadOrGhost, unit)
-    Line("Tot/Offline-Erkennung", state == "ok" and OK or BAD, state ~= "ok" and "Wert " .. state or nil)
+    Line(L["Dead/offline detection"], state == "ok" and OK or BAD, state ~= "ok" and L["value: %s"]:format(state) or nil)
 
     if not UnitGetIncomingHeals then
-        Line("Eingehende Heilung", BAD, "Funktion fehlt")
+        Line(L["Incoming heals"], BAD, L["function missing"])
     else
         local ok = pcall(function()
             local probe = CreateFrame("StatusBar")
             probe:SetMinMaxValues(0, UnitHealthMax(unit))
             probe:SetValue(UnitGetIncomingHeals(unit) or 0)
         end)
-        Line("Eingehende Heilung", ok and OK or BAD)
+        Line(L["Incoming heals"], ok and OK or BAD)
     end
 end
 
@@ -65,11 +66,11 @@ local function TestSpells()
         if #s.ranks > 1 then ranked = ranked + 1 end
     end
     if total == 0 then
-        Line("Zauberbuch", BAD, "keine Zauber gefunden")
+        Line(L["Spellbook"], BAD, L["no spells found"])
     else
-        Line("Zauberbuch", OK, total .. " Zauber")
-        Line("Ränge", ranked > 0 and OK or WARN,
-            ranked > 0 and (ranked .. " Zauber mit mehreren Rängen") or "kein Zauber mit mehreren Rängen gefunden (niedrige Stufe oder Client liefert nur den höchsten Rang)")
+        Line(L["Spellbook"], OK, L["%d spells"]:format(total))
+        Line(L["Ranks"], ranked > 0 and OK or WARN,
+            ranked > 0 and L["%d spells with multiple ranks"]:format(ranked) or L["no spell with multiple ranks found (low level, or the client only reports the highest rank)"])
     end
 
     local def = ns.CLASS_DEFAULTS[ns.class]
@@ -83,22 +84,22 @@ local function TestSpells()
             end
             if hit then found = found + 1 else missing = missing + 1 end
         end
-        Line("Startbelegung der Klasse", found > 0 and OK or WARN,
-            ("%d von %d Zaubern bekannt"):format(found, found + missing))
+        Line(L["Class default bindings"], found > 0 and OK or WARN,
+            (L["%d of %d spells known"]):format(found, found + missing))
     end
 
     local cost
     local first = ns.spellList[1]
     if first then cost = ns.ManaCost(first.ranks[1].id) end
-    Line("Manakosten der Ränge", cost ~= nil and OK or WARN, cost == nil and "nicht auslesbar" or nil)
+    Line(L["Mana cost of ranks"], cost ~= nil and OK or WARN, cost == nil and L["not readable"] or nil)
 
     if ns.class == "PRIEST" or ns.class == "PALADIN" or ns.class == "SHAMAN" then
-        Line("Wiederbeleben per Heil-Klick", ns.resName and OK or WARN,
-            ns.resName or "Wiederbelebungszauber nicht gelernt oder nicht erkannt")
+        Line(L["Resurrect via heal click"], ns.resName and OK or WARN,
+            ns.resName or L["resurrection spell not learned or not detected"])
     end
     if ns.class == "PRIEST" or ns.class == "DRUID" or ns.class == "MAGE" then
-        Line("Fehlender Klassenbuff", ns.classBuff and OK or WARN,
-            ns.classBuff and ns.classBuff.cast or "Buff nicht gelernt oder nicht erkannt")
+        Line(L["Missing class buff"], ns.classBuff and OK or WARN,
+            ns.classBuff and ns.classBuff.cast or L["buff not learned or not detected"])
     end
 end
 
@@ -109,53 +110,53 @@ local function TestBindings(button)
             if button:GetAttribute(mod.key .. "type" .. n) then count = count + 1 end
         end
     end
-    Line("Klick-Belegung", count > 0 and OK or BAD,
-        count > 0 and (count .. " Tasten am Frame gesetzt; ob der Klick wirklich zaubert, bitte selbst prüfen") or "keine Belegung am Frame angekommen")
+    Line(L["Click bindings"], count > 0 and OK or BAD,
+        count > 0 and L["%d buttons set on the frame; please check yourself whether a click really casts"]:format(count) or L["no bindings arrived at the frame"])
 end
 
 local function TestAuras(button)
     if button.aurasReady then
-        Line("Buff-/Debuff-Icons", OK, "über Blizzard-Bausteine, auch im Kampf")
-        Line("Rahmenfarbe bei bannbaren Debuffs", OK, "über Blizzard-Baustein")
+        Line(L["Buff/debuff icons"], OK, L["via Blizzard components, also in combat"])
+        Line(L["Border color for dispellable debuffs"], OK, L["via Blizzard component"])
     elseif button.manual then
-        Line("Buff-/Debuff-Icons", WARN, "Blizzard-Baustein nicht verfügbar, Icons nur außerhalb des Kampfes"
+        Line(L["Buff/debuff icons"], WARN, L["Blizzard component not available, icons only out of combat"]
             .. (ns.containerError and (" – " .. ns.containerError) or ""))
     else
-        Line("Buff-/Debuff-Icons", WARN, "werden nach dem Kampf eingerichtet")
+        Line(L["Buff/debuff icons"], WARN, L["will be set up after combat"])
     end
-    Line("Auren gerade gesperrt", OK, ns.AurasSecret() and "ja" or "nein")
+    Line(L["Auras currently restricted"], OK, ns.AurasSecret() and L["yes"] or L["no"])
     if ns.classBuff then
-        Line("Erkennung fehlender Buffs", OK, "nur außerhalb des Kampfes")
+        Line(L["Missing buff detection"], OK, L["only out of combat"])
     end
 end
 
 local function TestStatus(unit, other)
     local state = Probe(UnitThreatSituation, unit)
-    Line("Aggro-Rahmen", state == "ok" and OK or BAD,
-        state == "secret" and "Bedrohung ist geheim" or state == "missing" and "Funktion fehlt" or nil)
+    Line(L["Aggro border"], state == "ok" and OK or BAD,
+        state == "secret" and L["threat is secret"] or state == "missing" and L["function missing"] or nil)
 
     if other then
         state = Probe(UnitInRange, other)
         if state == "ok" then
-            Line("Reichweite", OK)
+            Line(L["Range"], OK)
         elseif state == "secret" then
             local alt = CreateFrame("Frame").SetAlphaFromBoolean ~= nil
-            Line("Reichweite", alt and OK or BAD, alt and "Wert geheim, Anzeige über Client-Funktion" or "Wert geheim und keine Ersatzfunktion")
+            Line(L["Range"], alt and OK or BAD, alt and L["value is secret, shown via a client function"] or L["value is secret and there is no fallback function"])
         else
-            Line("Reichweite", BAD, "Funktion fehlt oder Fehler")
+            Line(L["Range"], BAD, L["function missing or error"])
         end
     else
-        Line("Reichweite", WARN, "nur in einer Gruppe prüfbar")
+        Line(L["Range"], WARN, L["can only be checked in a group"])
     end
 
     state = Probe(GetRaidTargetIndex, unit)
-    Line("Schlachtzugsymbole", (state == "ok") and OK or BAD, state ~= "ok" and "Wert " .. state or nil)
-    Line("Bereitschaftscheck", GetReadyCheckStatus and OK or BAD)
-    Line("Eingehende Wiederbelebung", UnitHasIncomingResurrection and OK or BAD)
+    Line(L["Raid target icons"], (state == "ok") and OK or BAD, state ~= "ok" and L["value: %s"]:format(state) or nil)
+    Line(L["Ready check"], GetReadyCheckStatus and OK or BAD)
+    Line(L["Incoming resurrection"], UnitHasIncomingResurrection and OK or BAD)
 
     state = Probe(UnitPower, "player", ns.MANA)
-    Line("Mana-Ticks", state == "ok" and OK or WARN,
-        state == "secret" and "Mana geheim: Ticks werden über Events geschätzt, Details mit /hbu ticks" or nil)
+    Line(L["Mana ticks"], state == "ok" and OK or WARN,
+        state == "secret" and L["mana is secret: ticks are estimated from events, details with /hbu ticks"] or nil)
 end
 
 -- Zeigt alle Anzeigen kurz am Frame, damit man sie einmal gesehen hat
@@ -181,9 +182,9 @@ end
 function ns.RunTest()
     problems = 0
     local version, build, _, interface = GetBuildInfo()
-    ns.Print(("Selbsttest – Client %s (%s), Interface %s, %s"):format(
+    ns.Print((L["Self-test – client %s (%s), interface %s, %s"]):format(
         tostring(version), tostring(build), tostring(interface),
-        InCombatLockdown() and "|cffff5555im Kampf|r" or "außerhalb des Kampfes"))
+        InCombatLockdown() and "|cffff5555" .. L["in combat"] .. "|r" or L["out of combat"]))
 
     local button
     for _, b in ipairs(ns.buttons or {}) do
@@ -193,7 +194,7 @@ function ns.RunTest()
         end
     end
     if not button then
-        return ns.Print("Kein eigenes Frame sichtbar – Test abgebrochen.")
+        return ns.Print(L["Own frame not visible – test aborted."])
     end
     local other
     for _, b in ipairs(ns.buttons) do
@@ -208,11 +209,11 @@ function ns.RunTest()
     ns.Safe(Demo, button)
 
     if problems == 0 then
-        ns.Print("Alles in Ordnung. Am eigenen Frame laufen jetzt 5 Sekunden lang alle Anzeigen.")
+        ns.Print(L["Everything is fine. All indicators now run on your own frame for 5 seconds."])
     else
-        ns.Print(problems .. " Punkt(e) eingeschränkt oder nicht möglich (siehe oben). Am eigenen Frame laufen jetzt 5 Sekunden lang alle Anzeigen.")
+        ns.Print(L["%d item(s) limited or not working (see above). All indicators now run on your own frame for 5 seconds."]:format(problems))
     end
     if not InCombatLockdown() then
-        ns.Print("Viele Werte sind nur im Kampf geheim – bitte den Test einmal im Kampf wiederholen.")
+        ns.Print(L["Many values are only secret in combat – please repeat the test once in combat."])
     end
 end

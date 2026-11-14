@@ -1,0 +1,6 @@
+package-as: Healbuddy
+
+ignore:
+  - README.md
+  - .github
+  - .gitignore

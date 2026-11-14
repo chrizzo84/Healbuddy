@@ -1,4 +1,5 @@
 local _, ns = ...
+local L = ns.L
 local issecret = ns.issecret
 
 -- 5-Sekunden-Regel: Nach jedem Zauber, der Mana kostet, setzt die
@@ -82,7 +83,7 @@ end
 
 -- Schießen (Zauberstab), Automatischer Schuss, Nahkampf: kosten nie Mana
 local FREE = { [5019] = true, [75] = true, [6603] = true }
-local autoRepeat, lastCastInfo = false, "noch keiner"
+local autoRepeat, lastCastInfo = false, L["none yet"]
 local lastPower, pendingCast
 local powerEvents = 0
 
@@ -107,7 +108,7 @@ local function OnPowerEvent(powerType)
     lastPower = now
     powerEvents = powerEvents + 1
     if pendingCast and now - pendingCast < 0.3 then
-        lastCastInfo = lastCastInfo .. " -> Manaänderung direkt danach: Manazauber"
+        lastCastInfo = lastCastInfo .. " -> " .. L["mana change right after: mana spell"]
         return StartFSR(now)
     end
     if not secret then return end
@@ -118,15 +119,15 @@ end
 -- true = kostet Mana, false = sicher nicht, nil = nicht auslesbar
 local function CostsMana(spellID)
     if not issecret(spellID) and FREE[spellID] then
-        lastCastInfo = "kostenlos (Zauberstab/Autoschuss)"
+        lastCastInfo = L["free (wand/auto shot)"]
         return false
     end
     local ok, cost = pcall(ns.ManaCost, spellID)
     if ok and cost then
-        lastCastInfo = "Kosten " .. cost
+        lastCastInfo = L["cost %s"]:format(cost)
         return cost > 0
     end
-    lastCastInfo = issecret(spellID) and "Zauber-ID geheim" or "Kosten unbekannt"
+    lastCastInfo = issecret(spellID) and L["spell ID is secret"] or L["cost unknown"]
     return nil
 end
 
@@ -139,29 +140,29 @@ local function OnCastSucceeded(spellID)
         -- Kosten nicht auslesbar (Zauberstab, Gegenstände, Berufe, geheime IDs):
         -- nur werten, wenn sich zeitgleich das Mana geändert hat.
         if autoRepeat then
-            lastCastInfo = lastCastInfo .. ", Zauberstab aktiv: ignoriert"
+            lastCastInfo = lastCastInfo .. ", " .. L["wand active: ignored"]
         elseif powerEvents == 0 then
             -- Der Client meldet gar keine Mana-Änderungen: lieber anzeigen als verschweigen
-            lastCastInfo = lastCastInfo .. ", keine Mana-Events vorhanden: als Manazauber gewertet"
+            lastCastInfo = lastCastInfo .. ", " .. L["no mana events available: counted as mana spell"]
             StartFSR(now)
         elseif lastPower and now - lastPower < 0.3 then
-            lastCastInfo = lastCastInfo .. ", Manaänderung direkt davor: Manazauber"
+            lastCastInfo = lastCastInfo .. ", " .. L["mana change right before: mana spell"]
             StartFSR(now)
         else
-            lastCastInfo = lastCastInfo .. ", warte auf Manaänderung"
+            lastCastInfo = lastCastInfo .. ", " .. L["waiting for mana change"]
             pendingCast = now
         end
     end
 end
 
 function ns.FSRDebug()
-    if not bar then return ns.Print("Tickanzeige: für diese Klasse nicht aktiv.") end
-    ns.Print("Letzter Zauber: " .. lastCastInfo .. ("; Mana-Events bisher: %d"):format(powerEvents))
+    if not bar then return ns.Print(L["Tick display: not active for this class."]) end
+    ns.Print(L["Last spell: %s; mana events so far: %d"]:format(lastCastInfo, powerEvents))
     if secret then
-        return ns.Print(("Tickanzeige: Mana ist geheim, Ticks werden über Events geschätzt. Ticks erkannt: %d, letzter Abstand: %s s, fließend-Zähler: %d, Option an: %s"):format(
+        return ns.Print((L["Tick display: mana is secret, ticks are estimated from events. Ticks detected: %d, last interval: %s s, smooth counter: %d, option on: %s"]):format(
             gains, lastInterval and ("%.2f"):format(lastInterval) or "-", smooth, tostring(ns.db.fsr)))
     end
-    ns.Print(("Tickanzeige: Mana %s/%s, Zuwächse erkannt: %d, letzter Abstand: %s s, fließend-Zähler: %d, voll: %s, Option an: %s"):format(
+    ns.Print((L["Tick display: mana %s/%s, gains detected: %d, last interval: %s s, smooth counter: %d, full: %s, option on: %s"]):format(
         tostring(lastMana), tostring(UnitPowerMax("player", ns.MANA)), gains,
         lastInterval and ("%.2f"):format(lastInterval) or "-", smooth, tostring(full), tostring(ns.db.fsr)))
 end

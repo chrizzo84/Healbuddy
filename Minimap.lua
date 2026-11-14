@@ -1,4 +1,5 @@
 local _, ns = ...
+local L = ns.L
 
 -- Runder Knopf am Minimap-Rand: Linksklick öffnet die Einstellungen
 local button
@@ -56,7 +57,7 @@ function ns.CreateMinimapButton()
             ns.db.locked = not ns.db.locked
             ns.UpdateLock()
             if ns.RefreshOptions then ns.RefreshOptions() end
-            ns.Print(ns.db.locked and "Position fixiert." or "Position frei.")
+            ns.Print(ns.db.locked and L["Position locked."] or L["Position unlocked."])
         else
             ns.ToggleOptions()
         end
@@ -66,9 +67,9 @@ function ns.CreateMinimapButton()
     button:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
         GameTooltip:AddLine("Healbuddy")
-        GameTooltip:AddLine("Linksklick: Einstellungen", 1, 1, 1)
-        GameTooltip:AddLine("Rechtsklick: Position fixieren/lösen", 1, 1, 1)
-        GameTooltip:AddLine("Ziehen: Knopf verschieben", 1, 1, 1)
+        GameTooltip:AddLine(L["Left click: settings"], 1, 1, 1)
+        GameTooltip:AddLine(L["Right click: lock/unlock position"], 1, 1, 1)
+        GameTooltip:AddLine(L["Drag: move button"], 1, 1, 1)
         GameTooltip:Show()
     end)
     button:SetScript("OnLeave", function() GameTooltip:Hide() end)
