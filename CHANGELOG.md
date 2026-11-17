@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.3.1
+
+- Cooldowns: Power Word: Shield is shown by default; every spell that has a
+  cooldown of its own can now be selected, however short
+
 ## v0.3.0
 
 - Pin heal targets: a new click action ("Pin heal target", Alt + middle click

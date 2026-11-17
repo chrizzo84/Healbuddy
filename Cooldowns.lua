@@ -9,7 +9,7 @@ local SIZE, GAP = 18, 1
 
 -- Zauber-IDs (Rang 1); angezeigt wird nur, was der Charakter beherrscht
 local CURATED = {
-    PRIEST = { 14751, 10060, 33206, 47788, 47540, 33076, 34861, 64843, 13908, 6346, 34433, 724, 586 },
+    PRIEST = { 17, 14751, 10060, 33206, 47788, 47540, 33076, 34861, 64843, 13908, 6346, 34433, 724, 586 },
     DRUID = { 17116, 18562, 29166, 20484, 740, 48438, 22812 },
     PALADIN = { 633, 20216, 20473, 31842, 1022, 642, 498, 1044 },
     SHAMAN = { 16188, 16190, 61295, 55198, 2825, 32182, 8177 },
@@ -28,7 +28,9 @@ local function BaseCooldown(id)
 end
 
 -- Alle Zauber, die als Cooldown-Icon in Frage kommen: zuerst die Auswahl für
--- die Klasse, danach alles andere mit mindestens 8 Sekunden Abklingzeit.
+-- die Klasse, danach alles andere, das überhaupt eine eigene Abklingzeit hat
+-- (die globale Abklingzeit zählt nicht). Verrät der Client die Abklingzeit
+-- nicht, werden alle aktiven Zauber angeboten.
 function ns.CooldownCandidates()
     local list, seen, extra = {}, {}, {}
     wipe(curated)
@@ -43,7 +45,7 @@ function ns.CooldownCandidates()
     for name, entry in pairs(ns.known) do
         if not seen[name] then
             local cd = BaseCooldown(entry.ranks[#entry.ranks].id)
-            if cd and cd >= 8 then table.insert(extra, entry) end
+            if cd == nil or cd > 0 then table.insert(extra, entry) end
         end
     end
     table.sort(extra, function(a, b) return a.name < b.name end)
