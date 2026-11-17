@@ -16,6 +16,7 @@ Locale.lua
 Core.lua
 Frames.lua
 FSR.lua
+Cooldowns.lua
 Minimap.lua
 Test.lua
 Options.lua

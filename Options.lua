@@ -152,6 +152,7 @@ local function ActionItems()
         { value = "none", text = "|cff888888" .. L["– nothing –"] .. "|r" },
         { value = "target", text = L["Target"], icon = "Interface\\Icons\\Ability_Hunter_SniperShot" },
         { value = "menu", text = L["Menu"], icon = "Interface\\Icons\\INV_Misc_Note_01" },
+        { value = "pin", text = L["Pin heal target"], icon = "Interface\\Icons\\Spell_ChargePositive" },
     }
     for _, s in ipairs(ns.spellList) do
         table.insert(items, { value = "spell:" .. s.name, text = s.name, icon = s.icon })
@@ -169,6 +170,7 @@ local function RefreshRow(row)
     row.max:SetShown(isSpell and true or false)
     row.maxLabel:SetShown(isSpell and true or false)
     row.rank:SetShown(isSpell and true or false)
+    row.ladder:SetShown(hasRanks and true or false)
     if isSpell then
         row.max:SetChecked(bind.max and true or false)
         row.rank:SetActive(hasRanks and not bind.max or false)
@@ -184,6 +186,55 @@ end
 
 local currentPage = "bind"
 local pages, pageTabs, look
+local cdButtons, cdEmpty = {}, nil
+
+local function PreviewItems()
+    local items = { { value = 0, text = L["Off"] } }
+    for _, count in ipairs({ 5, 10, 25, 40 }) do
+        table.insert(items, { value = count, text = L["%d players"]:format(count) })
+    end
+    return items
+end
+
+-- Cooldown-Seite: ein Icon je Zauber, Klick schaltet die Anzeige um
+local function RefreshCooldownPage()
+    local list = ns.CooldownCandidates()
+    for i, entry in ipairs(list) do
+        local b = cdButtons[i]
+        if not b then
+            b = CreateFrame("Button", nil, pages.cd)
+            b:SetSize(28, 28)
+            b:SetPoint("TOPLEFT", 16 + ((i - 1) % 18) * 32, -66 - math.floor((i - 1) / 18) * 32)
+            b.icon = b:CreateTexture(nil, "ARTWORK")
+            b.icon:SetAllPoints()
+            b.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+            local hl = b:CreateTexture(nil, "HIGHLIGHT")
+            hl:SetAllPoints()
+            hl:SetColorTexture(1, 1, 1, 0.2)
+            b:SetScript("OnClick", function(self)
+                ns.ToggleCooldown(self.name)
+                ns.RefreshOptions()
+                if GameTooltip:IsOwned(self) then self:GetScript("OnEnter")(self) end
+            end)
+            b:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_TOP")
+                GameTooltip:AddLine(self.name)
+                GameTooltip:AddLine(ns.CooldownShown(self.name) and L["shown"] or L["hidden"], 1, 1, 1)
+                GameTooltip:Show()
+            end)
+            b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            cdButtons[i] = b
+        end
+        local on = ns.CooldownShown(entry.name)
+        b.name = entry.name
+        b.icon:SetTexture(entry.icon)
+        b.icon:SetDesaturated(not on)
+        b:SetAlpha(on and 1 or 0.4)
+        b:Show()
+    end
+    for i = #list + 1, #cdButtons do cdButtons[i]:Hide() end
+    cdEmpty:SetShown(#list == 0)
+end
 
 function ns.RefreshOptions()
     if not options or not options:IsShown() then return end
@@ -203,6 +254,8 @@ function ns.RefreshOptions()
     look.width:SetText(db.width)
     look.height:SetText(db.height)
     look.scale:SetText(math.floor(db.scale * 100 + 0.5) .. "%")
+    look.preview:Set(ns.GetPreview())
+    if currentPage == "cd" then RefreshCooldownPage() end
 end
 
 local function Changed()
@@ -210,6 +263,18 @@ local function Changed()
     ns.ApplyBindings()
     ns.RefreshOptions()
     if InCombatLockdown() then ns.Print(L["Change takes effect after combat."]) end
+end
+
+local function SmallButton(parent, text, width, onClick)
+    local b = CreateFrame("Button", nil, parent)
+    b:SetSize(width, 22)
+    b.bg = Flat(b, 0.2, 0.6, 0.9, 0.12)
+    Flat(b, 1, 1, 1, 0.1, "HIGHLIGHT")
+    local fs = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    fs:SetPoint("CENTER")
+    fs:SetText(text)
+    b:SetScript("OnClick", onClick)
+    return b
 end
 
 local function CreateRow(parent, index, y)
@@ -267,19 +332,26 @@ local function CreateRow(parent, index, y)
         Changed()
     end)
     row.rank:SetPoint("LEFT", row.maxLabel, "RIGHT", 8, 0)
-    return row
-end
 
-local function SmallButton(parent, text, width, onClick)
-    local b = CreateFrame("Button", nil, parent)
-    b:SetSize(width, 22)
-    b.bg = Flat(b, 0.2, 0.6, 0.9, 0.12)
-    Flat(b, 1, 1, 1, 0.1, "HIGHLIGHT")
-    local fs = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    fs:SetPoint("CENTER")
-    fs:SetText(text)
-    b:SetScript("OnClick", onClick)
-    return b
+    row.ladder = SmallButton(parent, L["Ladder"], 50, function()
+        local bind = ns.GetBinding(currentMod, index)
+        if bind.kind == "spell" and bind.spell then
+            ns.MakeLadder(index, bind.spell)
+            ns.RefreshOptions()
+            if InCombatLockdown() then ns.Print(L["Change takes effect after combat."]) end
+        end
+    end)
+    row.ladder:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -10, y)
+    row.ladder:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine(L["Rank ladder"])
+        GameTooltip:AddLine(L["Puts three ranks of this spell on this mouse button:"], 1, 1, 1)
+        GameTooltip:AddLine(L["Click = economical, Shift = medium, Ctrl = highest rank"], 1, 1, 1)
+        GameTooltip:AddLine(L["Overwrites the Shift and Ctrl bindings of this mouse button."], 1, 0.6, 0.6)
+        GameTooltip:Show()
+    end)
+    row.ladder:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    return row
 end
 
 local function Label(parent, text, x, y)
@@ -377,6 +449,13 @@ local function CreateLookPage(page)
     end)
     look.skin:SetPoint("TOPLEFT", 100, -44)
 
+    Label(page, L["Preview"], 290, -44)
+    look.preview = CreateDropdown(page, 200, PreviewItems, function(value)
+        ns.SetPreview(value)
+        ns.RefreshOptions()
+    end)
+    look.preview:SetPoint("TOPLEFT", 340, -44)
+
     Label(page, L["Bar"], 16, -76)
     look.texture = CreateDropdown(page, 170, function() return ns.TEXTURES end, function(value)
         ns.db.texture = value
@@ -412,9 +491,18 @@ local function CreateLookPage(page)
     Check(page, "locked", L["Lock position (hide title bar)"], 12, -198, ns.UpdateLock)
 end
 
+local function CreateCooldownPage(page)
+    local hint = page:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    hint:SetPoint("TOPLEFT", 16, -42)
+    hint:SetText(L["Click an icon to show or hide it below the mana bar."])
+    cdEmpty = page:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    cdEmpty:SetPoint("TOPLEFT", 16, -70)
+    cdEmpty:SetText(L["No spells with a cooldown found."])
+end
+
 local function CreateOptions()
     options = CreateFrame("Frame", "HealbuddyOptions", UIParent)
-    options:SetSize(560, 256)
+    options:SetSize(610, 256)
     options:SetPoint("CENTER")
     options:SetFrameStrata("DIALOG")
     options:EnableMouse(true)
@@ -440,7 +528,7 @@ local function CreateOptions()
 
     -- Seiten: Belegung | Aussehen
     pages, pageTabs = {}, {}
-    for i, def in ipairs({ { "bind", L["Bindings"] }, { "look", L["Appearance"] } }) do
+    for i, def in ipairs({ { "bind", L["Bindings"] }, { "look", L["Appearance"] }, { "cd", L["Cooldowns"] } }) do
         local page = CreateFrame("Frame", nil, options)
         page:SetAllPoints()
         pages[def[1]] = page
@@ -454,8 +542,13 @@ local function CreateOptions()
     end
     CreateBindPage(pages.bind)
     CreateLookPage(pages.look)
+    CreateCooldownPage(pages.cd)
 
     options:SetScript("OnShow", ns.RefreshOptions)
+    -- Die Vorschau gehört zum Einstellungsfenster
+    options:SetScript("OnHide", function()
+        if ns.GetPreview() > 0 and not InCombatLockdown() then ns.SetPreview(0) end
+    end)
 end
 
 function ns.ToggleOptions()

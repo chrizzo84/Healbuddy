@@ -154,6 +154,9 @@ local function TestStatus(unit, other)
     Line(L["Ready check"], GetReadyCheckStatus and OK or BAD)
     Line(L["Incoming resurrection"], UnitHasIncomingResurrection and OK or BAD)
 
+    local viaObject = Has(C_Spell, "GetSpellCooldownDuration")
+    Line(L["Cooldown icons"], viaObject and OK or WARN, not viaObject and L["only out of combat"] or nil)
+
     state = Probe(UnitPower, "player", ns.MANA)
     Line(L["Mana ticks"], state == "ok" and OK or WARN,
         state == "secret" and L["mana is secret: ticks are estimated from events, details with /hbu ticks"] or nil)

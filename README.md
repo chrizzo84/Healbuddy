@@ -23,7 +23,13 @@ Sprache des Spiels.*
   everyone who needs it
 - **Optional**: resurrect dead players with your normal heal click (out of
   combat), show pets
-- **Skins**: five presets, bar texture, color mode, width, height and scale
+- **Pinned heal targets**: put up to five players into a larger row at the top
+  with one click
+- **Rank ladder**: three ranks of a spell on one mouse button (click, Shift,
+  Ctrl) with one button press
+- **Cooldown icons** for your important spells below the mana bar, selectable
+- **Skins**: five presets, bar texture, color mode, width, height and scale,
+  with a preview of 5 to 40 example frames
 - **Minimap button** for the settings
 
 ## Commands

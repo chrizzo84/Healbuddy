@@ -41,6 +41,15 @@ Design goal: few settings, good UI. Do not add options lightly.
 - The spell list shows helpful and neutral spells plus a whitelist of spells
   that work on friend and foe (`DUAL_IDS` in Core.lua: Penance, Holy Shock,
   Dispel Magic). If a spell is missing, ask for `/hbu spell <name>`.
+- Pinned heal targets are stored by name (`cdb.pins`); the five pin buttons
+  get their unit token assigned out of combat (`DoPins`) and are looked up via
+  `pinByUnit`, not `byUnit`. The click action "pin" has no secure type and is
+  handled in `OnPostClick`.
+- Preview mode replaces state drivers on the raid buttons with fake data
+  (`b.preview`); every update path must skip preview buttons.
+- Spell cooldowns are secret in combat: use
+  `C_Spell.GetSpellCooldownDuration(id, true)` with
+  `Cooldown:SetCooldownFromDurationObject`.
 - Not possible: dispelling via context macro (only resurrect works); pets are
   shown solo/party only.
 
@@ -50,11 +59,12 @@ Design goal: few settings, good UI. Do not add options lightly.
 | --- | --- |
 | `Locale.lua` | `ns.L`, English keys, `deDE` block |
 | `Core.lua` | helpers, class defaults, spellbook scan, bindings, slash commands |
-| `Frames.lua` | unit buttons, skins, auras, buff buttons, layout, bindings |
+| `Frames.lua` | unit buttons, skins, auras, buff buttons, layout, bindings, pinned heal targets, preview |
 | `FSR.lua` | mana bar, 5-second rule, tick detection |
+| `Cooldowns.lua` | cooldown icon row between mana bar and frames |
 | `Minimap.lua` | minimap button |
 | `Test.lua` | `/hbu test` self-test |
-| `Options.lua` | settings window (pages "Bindings" and "Appearance") |
+| `Options.lua` | settings window (pages "Bindings", "Appearance", "Cooldowns") |
 
 Slash commands: `/hbu`, `/hbu lock|unlock|reset|test|ticks`, `/hbu spell <name>`
 (`/hbu zauber` also works).
@@ -83,4 +93,9 @@ Slash commands: `/hbu`, `/hbu lock|unlock|reset|test|ticks`, `/hbu spell <name>`
 - Bar textures "Blizzard" and "Striped"
 - English and German layout of the settings window
 - Whether Penance now appears in the spell dropdown
+- Everything added for v0.3.0: pinned heal targets (PostClick action, unit
+  reassignment, aura containers after `SetUnit`), rank ladder (and whether
+  `C_Spell.GetSpellDescription` yields usable heal values), preview mode,
+  cooldown icons (duration objects in combat, `GetSpellBaseCooldown` for the
+  candidate list, curated spell IDs)
 - CurseForge project approval (status was "New" on 2026-11-14)

@@ -40,6 +40,19 @@ local function IconSize()
     return BH < 36 and 11 or 13
 end
 
+-- Angepinnte Heilziele: eigene, größere Reihe über allen anderen Frames
+local PIN_MAX = 5
+local pins, pinByUnit, pinOff = {}, {}, 0
+-- Vorschau: Anzahl der Beispiel-Frames (0 = aus)
+local preview = 0
+
+local function Size(b)
+    if b.kind == "pin" then
+        return math.floor(BW * 1.25 + 0.5), math.floor(BH * 1.2 + 0.5)
+    end
+    return BW, BH
+end
+
 local EnsureAuras -- weiter unten definiert
 
 local function TextureFile()
@@ -58,11 +71,8 @@ local clicked, clickTime
 ---------------------------------------------------------------------------
 -- Aktualisierung einzelner Elemente
 ---------------------------------------------------------------------------
-local function UpdateName(b)
-    local u = b.unit
-    b.name:SetText(UnitName(u) or "")
-    local _, class = UnitClass(u)
-    local c = b.kind ~= "pet" and class and not issecret(class) and RAID_CLASS_COLORS and RAID_CLASS_COLORS[class]
+local function ColorName(b, class)
+    local c = class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[class]
     local mode = ns.db.colorMode
     if mode == "dark" then
         b.bar:SetStatusBarColor(0.2, 0.2, 0.23)
@@ -75,6 +85,13 @@ local function UpdateName(b)
             b.bar:SetStatusBarColor(0.2, 0.7, 0.3)
         end
     end
+end
+
+local function UpdateName(b)
+    local u = b.unit
+    b.name:SetText(UnitName(u) or "")
+    local _, class = UnitClass(u)
+    ColorName(b, b.kind ~= "pet" and class and not issecret(class) and class or nil)
 end
 
 -- Eingehende Heilung: zweiter Balken, der rechts an den Lebensbalken anschließt
@@ -190,7 +207,7 @@ end
 local function NeedsBuff(b)
     local buff, u = ns.classBuff, b.unit
     if AurasSecret() then return false end
-    if not (buff and b.kind ~= "pet" and C_UnitAuras and UnitExists(u) and UnitIsConnected(u)
+    if not (buff and b.kind ~= "pet" and b.kind ~= "pin" and C_UnitAuras and UnitExists(u) and UnitIsConnected(u)
         and not UnitIsDeadOrGhost(u) and UnitIsVisible(u)) then
         return false
     end
@@ -417,7 +434,39 @@ local function UpdateRange(b)
     end
 end
 
+-- Vorschau: Beispielwerte statt echter Einheit
+local function UpdatePreview(b)
+    local p = b.preview
+    b.name:SetText(p.name)
+    ColorName(b, p.class)
+    b.bar:SetMinMaxValues(0, 100)
+    b.pred:SetMinMaxValues(0, 100)
+    if p.hp == 0 then
+        b.bar:SetValue(0)
+        b.pred:SetValue(0)
+        b.status:SetText("|cffff5555" .. L["Dead"] .. "|r")
+    else
+        b.bar:SetValue(p.hp)
+        b.pred:SetValue(p.heal)
+        b.status:SetText(ns.db.percent and (p.hp .. "%") or "")
+    end
+    b.status:SetAlpha(1)
+    b.center:Hide()
+    b.raidIcon:Hide()
+    b.hasAggro = p.aggro
+    b.aggro:SetShown(p.aggro)
+    b.dispelColor = nil
+    UpdateBorder(b)
+    b.content:SetAlpha(p.far and 0.4 or 1)
+    if b.manual then
+        for i = 1, MAX_BUFFS do b.buffs[i]:Hide() end
+        for i = 1, MAX_DEBUFFS do b.debuffs[i]:Hide() end
+    end
+    if not InCombatLockdown() then b.buffBtn:Hide() end
+end
+
 local function UpdateAll(b)
+    if b.preview then return ns.Safe(UpdatePreview, b) end
     ns.Safe(UpdateName, b)
     ns.Safe(UpdateHealth, b)
     ns.Safe(UpdateAuras, b)
@@ -431,7 +480,7 @@ ns.UpdateAll = UpdateAll
 
 local function ForVisible(func)
     for _, b in ipairs(buttons) do
-        if b:IsVisible() then ns.Safe(func, b) end
+        if b:IsVisible() and not b.preview then ns.Safe(func, b) end
     end
 end
 
@@ -460,6 +509,7 @@ local function DoApplyBindings()
                 elseif kind == "menu" then
                     type = "togglemenu"
                 end
+                -- "pin" hat keine geschützte Aktion: das erledigt OnPostClick
                 b:SetAttribute(p .. "type" .. n, type)
                 b:SetAttribute(p .. "spell" .. n, spell)
                 b:SetAttribute(p .. "macrotext" .. n, macro)
@@ -486,6 +536,8 @@ local function ShowTooltip(b)
                 text = L["Target"]
             elseif bind and bind.kind == "menu" then
                 text = L["Menu"]
+            elseif bind and bind.kind == "pin" then
+                text = L["Pin heal target"]
             end
             if text then
                 local key = (mod.key ~= "" and (mod.label .. " + ") or "") .. ns.BUTTONS[n]
@@ -502,11 +554,22 @@ end
 local function SetPos(b, col, row)
     b.col, b.row = col, row
     b:ClearAllPoints()
-    b:SetPoint("TOPLEFT", container, "TOPLEFT", col * (BW + GAP), -(HANDLE + GAP) - row * (BH + GAP))
+    if b.kind == "pin" then
+        local w = Size(b)
+        b:SetPoint("TOPLEFT", container, "TOPLEFT", col * (w + GAP), -(HANDLE + GAP))
+    else
+        b:SetPoint("TOPLEFT", container, "TOPLEFT", col * (BW + GAP), -(HANDLE + GAP) - pinOff - row * (BH + GAP))
+    end
 end
 
 -- Schlachtzug: eine Spalte pro (nicht leerer) Gruppe
 local function DoLayout()
+    if preview > 0 then
+        for i = 1, preview do
+            SetPos(byUnit["raid" .. i], math.floor((i - 1) / 5), (i - 1) % 5)
+        end
+        return
+    end
     local members = {}
     for i = 1, 40 do
         local name, _, sub = GetRaidRosterInfo(i)
@@ -524,6 +587,179 @@ local function DoLayout()
             col = col + 1
         end
     end
+end
+
+---------------------------------------------------------------------------
+-- Angepinnte Heilziele
+--
+-- Gemerkt wird der Name. Die Pin-Frames bekommen außerhalb des Kampfes die
+-- passende Einheit (raid7, party2 ...) zugewiesen und werden bei jeder
+-- Änderung der Gruppe neu zugeordnet.
+---------------------------------------------------------------------------
+local function GroupUnits()
+    local units = {}
+    if IsInRaid and IsInRaid() then
+        for i = 1, 40 do units[i] = "raid" .. i end
+    else
+        units[1] = "player"
+        for i = 1, 4 do units[i + 1] = "party" .. i end
+    end
+    return units
+end
+
+local function FullName(unit)
+    if not unit or not UnitExists(unit) then return nil end
+    local name = GetUnitName and GetUnitName(unit, true) or UnitName(unit)
+    if not name or issecret(name) then return nil end
+    return name
+end
+
+local function GroupNames()
+    local byName = {}
+    for _, unit in ipairs(GroupUnits()) do
+        local name = FullName(unit)
+        if name then byName[name] = unit end
+    end
+    return byName
+end
+
+local function SetPinUnit(b, unit)
+    if unit then
+        b.unit = unit
+        b:SetAttribute("unit", unit)
+        b.buffBtn:SetAttribute("unit", unit)
+        if b.aurasReady then
+            for _, key in ipairs({ "auraBuffs", "auraDebuffs", "auraDispel" }) do
+                pcall(b[key].SetUnit, b[key], unit)
+            end
+        end
+        b.driver = ("[@%s,exists] show; hide"):format(unit)
+        pinByUnit[unit] = b
+    else
+        b.driver = "hide"
+    end
+    b.buffBtn:Hide()
+    b.content:SetAlpha(1) -- die Reichweite der vorigen Einheit gilt nicht mehr
+    RegisterStateDriver(b, "visibility", b.driver)
+end
+
+local function DoPins()
+    if preview > 0 then return DoLayout() end
+    local byName = GroupNames()
+    wipe(pinByUnit)
+    local shown = 0
+    for _, name in ipairs(ns.cdb.pins) do
+        local unit = byName[name]
+        if unit and shown < #pins then
+            shown = shown + 1
+            SetPinUnit(pins[shown], unit)
+        end
+    end
+    for i = shown + 1, #pins do SetPinUnit(pins[i], nil) end
+
+    local _, pinHeight = Size(pins[1])
+    pinOff = shown > 0 and (pinHeight + GAP + 3) or 0
+    for _, b in ipairs(buttons) do SetPos(b, b.col, b.row) end
+    DoLayout()
+    for _, b in ipairs(pins) do
+        if b:IsVisible() then ns.UpdateAll(b) end
+    end
+end
+
+function ns.TogglePin(unit)
+    local name = FullName(unit)
+    if not name then return end
+    local list = ns.cdb.pins
+    local removed = false
+    for i, pinned in ipairs(list) do
+        if pinned == name then
+            table.remove(list, i)
+            removed = true
+            break
+        end
+    end
+    if not removed then
+        if #list >= PIN_MAX then
+            -- Platz schaffen: zuerst Ziele vergessen, die nicht mehr in der Gruppe sind
+            local byName = GroupNames()
+            for i, pinned in ipairs(list) do
+                if not byName[pinned] then
+                    table.remove(list, i)
+                    break
+                end
+            end
+        end
+        if #list >= PIN_MAX then
+            return ns.Print(L["At most %d heal targets can be pinned."]:format(PIN_MAX))
+        end
+        table.insert(list, name)
+    end
+    if InCombatLockdown() then ns.Print(L["Change takes effect after combat."]) end
+    ns.AfterCombat(DoPins)
+end
+
+local BUTTON_INDEX = { LeftButton = 1, RightButton = 2, MiddleButton = 3, Button4 = 4, Button5 = 5 }
+
+-- Läuft nach dem geschützten Klick; hier nur die Aktion "Heilziel anpinnen"
+local function OnPostClick(self, button)
+    local n = BUTTON_INDEX[button]
+    if not n or self.preview then return end
+    local alt, ctrl, shift = IsAltKeyDown(), IsControlKeyDown(), IsShiftKeyDown()
+    if (alt and 1 or 0) + (ctrl and 1 or 0) + (shift and 1 or 0) > 1 then return end
+    local mod = alt and "alt-" or ctrl and "ctrl-" or shift and "shift-" or ""
+    local bind = ns.cdb.bindings[mod][n]
+    if bind and bind.kind == "pin" then ns.TogglePin(self.unit) end
+end
+
+---------------------------------------------------------------------------
+-- Vorschau mit Beispiel-Frames (nur außerhalb des Kampfes)
+---------------------------------------------------------------------------
+local PREVIEW_CLASSES = { "WARRIOR", "PRIEST", "DRUID", "MAGE", "ROGUE", "HUNTER", "PALADIN", "SHAMAN", "WARLOCK" }
+local PREVIEW_HP = { 100, 82, 100, 55, 100, 100, 30, 91, 100, 0 }
+
+local function DoPreview()
+    for _, b in ipairs(buttons) do
+        if preview > 0 then
+            local i = b.kind == "raid" and tonumber(b.unit:match("%d+"))
+            UnregisterStateDriver(b, "visibility")
+            if i and i <= preview then
+                local class = PREVIEW_CLASSES[(i - 1) % #PREVIEW_CLASSES + 1]
+                local hp = PREVIEW_HP[(i - 1) % #PREVIEW_HP + 1]
+                b.preview = {
+                    name = LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[class] or class,
+                    class = class, hp = hp, heal = hp == 55 and 25 or 0,
+                    aggro = i == 1, far = i % 9 == 0,
+                }
+                b:Show()
+            else
+                b.preview = nil
+                b:Hide()
+            end
+        else
+            b.preview = nil
+            RegisterStateDriver(b, "visibility", (b.kind ~= "pet" or ns.db.pets) and b.driver or "hide")
+        end
+    end
+    if preview > 0 then
+        pinOff = 0
+        DoLayout()
+    else
+        DoPins()
+    end
+    for _, b in ipairs(buttons) do
+        if b:IsVisible() then ns.UpdateAll(b) end
+    end
+end
+
+function ns.GetPreview()
+    return preview
+end
+
+function ns.SetPreview(count)
+    if InCombatLockdown() then return ns.Print(L["Not possible in combat."]) end
+    if count == preview then return end
+    preview = count
+    DoPreview()
 end
 
 local function DoPetDrivers()
@@ -680,11 +916,12 @@ end
 -- Verändert geschützte Frames, darf also nur außerhalb des Kampfes laufen.
 local function StyleButton(b)
     local file = TextureFile()
-    local low = BH < 36
+    local width, height = Size(b)
+    local low = height < 36
     local size = low and 11 or 13
     b.bar:SetStatusBarTexture(file)
     b.pred:SetStatusBarTexture(file)
-    b.pred:SetWidth(BW - 2)
+    b.pred:SetWidth(width - 2)
     if ns.db.colorMode == "dark" then
         b.bg:SetColorTexture(0.38, 0.07, 0.07, 1) -- fehlendes Leben fällt rot auf
     else
@@ -703,7 +940,7 @@ local function StyleButton(b)
     end
 
     -- Schmale Frames zeigen weniger Icons, damit sich Buffs und Debuffs nicht überlappen
-    b.maxIcons = math.max(1, math.min(MAX_BUFFS, math.floor((BW - 6) / 2 / (size + 1))))
+    b.maxIcons = math.max(1, math.min(MAX_BUFFS, math.floor((width - 6) / 2 / (size + 1))))
     if b.manual then PlaceManualIcons(b, size) end
     if b.aurasReady then pcall(StyleContainers, b, size) end
 
@@ -749,7 +986,7 @@ local function CreateUnitButton(unit, kind, col, row, driver)
     local index = #buttons + 1
     local b = CreateFrame("Button", "HealbuddyUnit" .. index, container, "SecureUnitButtonTemplate")
     b.unit, b.kind, b.driver = unit, kind, driver
-    b:SetSize(BW, BH)
+    b:SetSize(Size(b))
     SetPos(b, col, row)
     b:SetAttribute("unit", unit)
     b:SetAttribute("useOnKeyDown", false)
@@ -871,12 +1108,17 @@ local function CreateUnitButton(unit, kind, col, row, driver)
     b:SetScript("PreClick", function(self)
         clicked, clickTime = self, GetTime()
     end)
+    b:SetScript("PostClick", function(self, button) ns.Safe(OnPostClick, self, button) end)
     b:HookScript("OnEnter", function(self) ns.Safe(ShowTooltip, self) end)
     b:HookScript("OnLeave", function() GameTooltip:Hide() end)
     RegisterStateDriver(b, "visibility", (kind ~= "pet" or ns.db.pets) and driver or "hide")
 
     buttons[index] = b
-    byUnit[unit] = b
+    if kind == "pin" then
+        table.insert(pins, b)
+    else
+        byUnit[unit] = b
+    end
     return b
 end
 
@@ -917,14 +1159,19 @@ local function DoSkin()
     BW, BH = ns.db.width, ns.db.height
     container:SetSize(BW, HANDLE)
     for _, b in ipairs(buttons) do
-        b:SetSize(BW, BH)
-        SetPos(b, b.col, b.row)
+        b:SetSize(Size(b))
         StyleButton(b)
     end
-    DoLayout()
+    -- Ordnet alles neu an (in der Vorschau nur die Beispiel-Frames)
+    if preview > 0 then
+        DoLayout()
+    else
+        DoPins()
+    end
     for _, b in ipairs(buttons) do
         if b:IsVisible() then UpdateAll(b) end
     end
+    if ns.UpdateCooldowns then ns.UpdateCooldowns() end
 end
 
 function ns.ApplySkin()
@@ -1012,8 +1259,13 @@ function ns.CreateFrames()
     for i = 1, 40 do
         CreateUnitButton("raid" .. i, "raid", math.floor((i - 1) / 5), (i - 1) % 5, ("[@raid%d,exists] show; hide"):format(i))
     end
+    -- Angepinnte Heilziele: bleiben versteckt, bis DoPins ihnen jemanden zuweist
+    for i = 1, PIN_MAX do
+        CreateUnitButton("player", "pin", i - 1, 0, "hide")
+    end
     ns.ApplyBindings()
-    ns.AfterCombat(DoLayout)
+    ns.AfterCombat(DoPins)
+    ns.Safe(ns.CreateCooldowns, container)
     ns.Safe(ns.CreateFSR, container)
 
     local ev = CreateFrame("Frame")
@@ -1024,7 +1276,9 @@ function ns.CreateFrames()
         local handler = unitEvents[event]
         if handler then
             local b = byUnit[unit]
-            if b and b:IsVisible() then ns.Safe(handler, b) end
+            if b and b:IsVisible() and not b.preview then ns.Safe(handler, b) end
+            local pin = pinByUnit[unit]
+            if pin and pin:IsVisible() then ns.Safe(handler, pin) end
         elseif event == "RAID_TARGET_UPDATE" then
             ForVisible(UpdateRaidTarget)
         elseif event == "UI_ERROR_MESSAGE" then
@@ -1049,13 +1303,18 @@ function ns.CreateFrames()
             ForVisible(UpdateCenter)
         elseif event == "PLAYER_REGEN_DISABLED" then
             -- Letzte Gelegenheit vor der Kampfsperre
+            if preview > 0 then
+                preview = 0
+                ns.Safe(DoPreview)
+                if ns.RefreshOptions then ns.RefreshOptions() end
+            end
             for _, b in ipairs(buttons) do b.buffBtn:Hide() end
             buffAll:Hide()
         elseif event == "PLAYER_REGEN_ENABLED" then
             ForVisible(UpdateAuras)
         else
             if event == "GROUP_ROSTER_UPDATE" or event == "PLAYER_ENTERING_WORLD" then
-                ns.AfterCombat(DoLayout)
+                ns.AfterCombat(DoPins)
             end
             for _, b in ipairs(buttons) do
                 if b:IsVisible() then UpdateAll(b) end

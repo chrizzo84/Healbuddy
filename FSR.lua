@@ -182,9 +182,11 @@ end
 function ns.CreateFSR(anchor)
     if ns.class == "WARRIOR" or ns.class == "ROGUE" then return end
 
+    -- Der Manabalken sitzt über der Cooldown-Zeile (falls vorhanden)
+    local below = ns.cdRow or anchor
     mana = CreateFrame("StatusBar", nil, anchor)
-    mana:SetPoint("BOTTOMLEFT", anchor, "TOPLEFT", 0, 2)
-    mana:SetPoint("BOTTOMRIGHT", anchor, "TOPRIGHT", 0, 2)
+    mana:SetPoint("BOTTOMLEFT", below, "TOPLEFT", 0, 2)
+    mana:SetPoint("BOTTOMRIGHT", below, "TOPRIGHT", 0, 2)
     mana:SetHeight(10)
     mana:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
     mana:SetStatusBarColor(0.15, 0.35, 0.9)

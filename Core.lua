@@ -294,6 +294,15 @@ local function Defaults()
     for _, mod in ipairs(ns.MODS) do
         cdb.bindings[mod.key] = cdb.bindings[mod.key] or {}
     end
+    cdb.cooldowns = cdb.cooldowns or {}
+    if not cdb.pins then
+        cdb.pins = {}
+        -- Bestehende Belegung: "Heilziel anpinnen" auf Alt + Mittelklick, falls frei
+        local slot = cdb.bindings["alt-"][3]
+        if not cdb.needSetup and (not slot or slot.kind == "none") then
+            cdb.bindings["alt-"][3] = { kind = "pin" }
+        end
+    end
     ns.db, ns.cdb = db, cdb
 end
 
@@ -344,12 +353,57 @@ function ns.AutoSetup(force)
     -- Anvisieren und Menü: auf der bloßen Taste, sonst mit Alt
     if b[""][1] then b["alt-"][1] = { kind = "target" } else b[""][1] = { kind = "target" } end
     if b[""][2] then b["alt-"][2] = { kind = "menu" } else b[""][2] = { kind = "menu" } end
+    b["alt-"][3] = { kind = "pin" }
 
     cdb.bindings = b
     -- Hat die Klasse Heilzauber, kennt sie aber noch nicht: später erneut versuchen
     cdb.needSetup = (def ~= nil and not any) or nil
     if ns.ApplyBindings then ns.ApplyBindings() end
     if any then ns.Print(L["Default bindings for your class have been set – view/change them with /hbu."]) end
+end
+
+-- Heilung eines Rangs laut Zauberbeschreibung (erste Zahl bzw. Mittelwert
+-- von "X bis Y"); nil, wenn der Client den Text nicht hergibt. Nur ein
+-- Näherungswert für den Vergleich der Ränge untereinander.
+function ns.HealAmount(id)
+    if not (C_Spell and C_Spell.GetSpellDescription) then return nil end
+    local ok, text = pcall(C_Spell.GetSpellDescription, id)
+    if not ok or type(text) ~= "string" or issecret(text) then return nil end
+    local function num(s) return tonumber((s:gsub("%D", ""))) end
+    local a, between, b = text:match("(%d[%d%.,]*)(%D+)(%d[%d%.,]*)")
+    if a and #between <= 6 then
+        a, b = num(a), num(b)
+        if a and b and b >= a then return (a + b) / 2 end
+    end
+    local first = text:match("%d[%d%.,]*")
+    return first and num(first) or nil
+end
+
+-- Rang-Leiter: drei Ränge eines Zaubers auf eine Maustaste legen
+-- (Klick = sparsam, Shift = mittel, Strg = höchster Rang)
+function ns.MakeLadder(button, name)
+    local spell = ns.spells[name]
+    local count = spell and #spell.ranks or 0
+    if count < 2 then return end
+    local picks = count == 2 and { 1, 2 }
+        or { math.max(1, math.ceil(count / 3)), math.ceil(count * 2 / 3), count }
+    local mods = { "", "shift-", "ctrl-" }
+    local labels = { L["Click"], "Shift", L["Ctrl"] }
+    local parts = {}
+    for i, index in ipairs(picks) do
+        local rank = spell.ranks[index]
+        local top = index == count
+        ns.cdb.bindings[mods[i]][button] = { kind = "spell", spell = name, max = top, id = rank.id }
+        local text = labels[i] .. " = " .. rank.label
+        local heal, cost = ns.HealAmount(rank.id), ns.ManaCost(rank.id)
+        if heal and cost and cost > 0 then
+            text = text .. " (" .. L["~%.1f healing per mana"]:format(heal / cost) .. ")"
+        end
+        table.insert(parts, text)
+    end
+    ns.cdb.needSetup = nil
+    ns.ApplyBindings()
+    ns.Print(L["Rank ladder for %s: %s"]:format(name, table.concat(parts, ", ")))
 end
 
 ---------------------------------------------------------------------------
@@ -373,6 +427,7 @@ f:SetScript("OnEvent", function(_, event, arg1)
         ns.Safe(ns.ScanSpells)
         ns.Safe(ns.AutoSetup)
         ns.ApplyBindings()
+        if ns.UpdateCooldowns then ns.Safe(ns.UpdateCooldowns) end
         if ns.RefreshOptions then ns.RefreshOptions() end
     elseif event == "PLAYER_REGEN_ENABLED" then
         local q = queue
