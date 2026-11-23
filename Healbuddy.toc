@@ -17,6 +17,7 @@ Core.lua
 Frames.lua
 FSR.lua
 Cooldowns.lua
+Legend.lua
 Minimap.lua
 Test.lua
 Options.lua

@@ -183,7 +183,7 @@ function ns.CreateFSR(anchor)
     if ns.class == "WARRIOR" or ns.class == "ROGUE" then return end
 
     -- Der Manabalken sitzt über der Cooldown-Zeile (falls vorhanden)
-    local below = ns.cdRow or anchor
+    local below = ns.legendRow or ns.cdRow or anchor
     mana = CreateFrame("StatusBar", nil, anchor)
     mana:SetPoint("BOTTOMLEFT", below, "TOPLEFT", 0, 2)
     mana:SetPoint("BOTTOMRIGHT", below, "TOPRIGHT", 0, 2)
@@ -196,6 +196,19 @@ function ns.CreateFSR(anchor)
     mana.text = mana:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     mana.text:SetPoint("CENTER")
     mana:SetShown(ns.db.fsr)
+
+    -- Klick auf den Manabalken: Mana-Hilferuf an die anderen Heiler
+    local call = CreateFrame("Button", nil, mana)
+    call:SetAllPoints()
+    call:RegisterForClicks("AnyUp")
+    call:SetScript("OnClick", function() ns.Safe(ns.CallForMana) end)
+    call:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine(L["Call for mana"])
+        GameTooltip:AddLine(L["Click: everyone in your group who uses Healbuddy sees a mana symbol on your frame."], 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    call:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     bar = CreateFrame("StatusBar", nil, anchor)
     bar:SetPoint("BOTTOMLEFT", mana, "TOPLEFT", 0, 1)

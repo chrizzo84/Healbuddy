@@ -43,6 +43,8 @@ end
 -- Angepinnte Heilziele: eigene, größere Reihe über allen anderen Frames
 local PIN_MAX = 5
 local pins, pinByUnit, pinOff = {}, {}, 0
+-- Name -> Einheit, außerhalb des Kampfes gepflegt (im Kampf sind Namen evtl. gesperrt)
+local rosterByName = {}
 -- Vorschau: Anzahl der Beispiel-Frames (0 = aus)
 local preview = 0
 
@@ -188,19 +190,35 @@ local function UpdateBorder(b)
     end
 end
 
-local function HasBuff(unit, name)
-    -- Im Zweifel "hat den Buff": lieber kein Icon als ein falsches
+-- Zustand des Klassenbuffs: "missing", "expiring" oder nil (vorhanden bzw.
+-- nicht feststellbar - im Zweifel lieber kein Icon als ein falsches)
+local REBUFF_AT = 300 -- Sekunden Restlaufzeit, ab denen nachgebufft werden soll
+local function BuffState(unit, names)
+    local found
     if C_UnitAuras.GetAuraDataBySpellName then
-        local ok, aura = pcall(C_UnitAuras.GetAuraDataBySpellName, unit, name, "HELPFUL")
-        return not ok or aura ~= nil
+        for _, name in ipairs(names) do
+            local ok, aura = pcall(C_UnitAuras.GetAuraDataBySpellName, unit, name, "HELPFUL")
+            if not ok then return nil end
+            if aura then found = aura break end
+        end
+    else
+        for i = 1, 40 do
+            local ok, aura = pcall(C_UnitAuras.GetAuraDataByIndex, unit, i, "HELPFUL")
+            if not ok then return nil end
+            if not aura then break end
+            if issecret(aura.name) then return nil end
+            for _, name in ipairs(names) do
+                if aura.name == name then found = aura end
+            end
+            if found then break end
+        end
     end
-    for i = 1, 40 do
-        local ok, aura = pcall(C_UnitAuras.GetAuraDataByIndex, unit, i, "HELPFUL")
-        if not ok then return true end
-        if not aura then return false end
-        if issecret(aura.name) or aura.name == name then return true end
-    end
-    return false
+    if not found then return "missing" end
+    local duration, expires = found.duration, found.expirationTime
+    if issecret(duration) or issecret(expires) or not duration or not expires then return nil end
+    -- Nur lange Buffs; kurze laufen ohnehin ständig aus
+    if duration >= 600 and expires - GetTime() < REBUFF_AT then return "expiring" end
+    return nil
 end
 
 -- Fehlt der Einheit der eigene Klassenbuff? (nur außerhalb des Kampfes prüfbar)
@@ -216,10 +234,7 @@ local function NeedsBuff(b)
         local _, class = UnitClass(u)
         if class == "WARRIOR" or class == "ROGUE" then return false end
     end
-    for _, name in ipairs(buff.names) do
-        if HasBuff(u, name) then return false end
-    end
-    return true
+    return BuffState(u, buff.names)
 end
 
 -- Fehlender Klassenbuff: anklickbares Icon, nur außerhalb des Kampfes
@@ -228,13 +243,24 @@ local function UpdateBuffButton(b)
     local show = NeedsBuff(b)
     if show then
         local buff = ns.classBuff
+        if b.buffBtn.state ~= show then
+            -- Fehlend: blass-rot; läuft bald aus: in Farbe
+            b.buffBtn.state = show
+            local expiring = show == "expiring"
+            b.buffBtn.icon:SetDesaturated(not expiring)
+            if expiring then
+                b.buffBtn.icon:SetVertexColor(1, 1, 1)
+            else
+                b.buffBtn.icon:SetVertexColor(1, 0.6, 0.6)
+            end
+        end
         if b.buffBtn.spell ~= buff.cast then
             b.buffBtn.spell = buff.cast
             b.buffBtn:SetAttribute("spell", buff.cast)
             b.buffBtn.icon:SetTexture(buff.icon)
         end
     end
-    b.buffBtn:SetShown(show)
+    b.buffBtn:SetShown(show and true or false)
 end
 
 -- Sammel-Knopf: jeder Klick bufft den Nächsten, dem der Klassenbuff fehlt.
@@ -305,7 +331,7 @@ local function CreateBuffAll(parent)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:AddLine(L["Buff all"])
         if self.unit then
-            GameTooltip:AddLine(L["%s missing on %s player(s)"]:format(self.spell or "", self.count:GetText() or ""), 1, 1, 1)
+            GameTooltip:AddLine(L["%s needed by %s player(s)"]:format(self.spell or "", self.count:GetText() or ""), 1, 1, 1)
             GameTooltip:AddDoubleLine(L["Next click:"], UnitName(self.unit) or "", 0.7, 0.7, 0.7, 1, 1, 1)
         end
         GameTooltip:Show()
@@ -434,6 +460,20 @@ local function UpdateRange(b)
     end
 end
 
+-- Dünner Manabalken am unteren Rand (nur Mana-Klassen). Der Balken nimmt
+-- die Werte direkt, auch wenn sie für Addons nicht lesbar sind.
+local function UpdatePower(b)
+    local u = b.unit
+    local powerType = UnitPowerType(u)
+    if b.kind == "pet" or issecret(powerType) or powerType ~= ns.MANA then
+        b.power:Hide()
+        return
+    end
+    b.power:SetMinMaxValues(0, UnitPowerMax(u, ns.MANA))
+    b.power:SetValue(UnitPower(u, ns.MANA))
+    b.power:Show()
+end
+
 -- Vorschau: Beispielwerte statt echter Einheit
 local function UpdatePreview(b)
     local p = b.preview
@@ -458,6 +498,13 @@ local function UpdatePreview(b)
     b.dispelColor = nil
     UpdateBorder(b)
     b.content:SetAlpha(p.far and 0.4 or 1)
+    if p.mana then
+        b.power:SetMinMaxValues(0, 100)
+        b.power:SetValue(p.mana)
+        b.power:Show()
+    else
+        b.power:Hide()
+    end
     if b.manual then
         for i = 1, MAX_BUFFS do b.buffs[i]:Hide() end
         for i = 1, MAX_DEBUFFS do b.debuffs[i]:Hide() end
@@ -469,6 +516,7 @@ local function UpdateAll(b)
     if b.preview then return ns.Safe(UpdatePreview, b) end
     ns.Safe(UpdateName, b)
     ns.Safe(UpdateHealth, b)
+    ns.Safe(UpdatePower, b)
     ns.Safe(UpdateAuras, b)
     ns.Safe(UpdateRaidTarget, b)
     ns.Safe(UpdateThreat, b)
@@ -487,29 +535,49 @@ end
 ---------------------------------------------------------------------------
 -- Click-Casting
 ---------------------------------------------------------------------------
+-- Liefert Typ, Zauber und Makrotext für eine Belegung
+local function ClickAction(bind, res, brez)
+    local kind = bind and bind.kind
+    if kind == "spell" and bind.spell then
+        -- Kontext-Klick: Tote wiederbeleben statt heilen (außerhalb des Kampfes
+        -- der normale Zauber, im Kampf die Wiedergeburt der Druiden)
+        local prefix = ""
+        if res and bind.spell ~= res then
+            prefix = prefix .. "[@mouseover,help,dead,nocombat] " .. res .. "; "
+        end
+        if brez and bind.spell ~= brez then
+            prefix = prefix .. "[@mouseover,help,dead,combat] " .. brez .. "; "
+        end
+        if prefix ~= "" then
+            return "macro", nil, "/cast " .. prefix .. "[@mouseover] " .. ns.MacroSpell(bind)
+        end
+        return "spell", ns.ResolveSpell(bind)
+    elseif kind == "combo" and ns.combo then
+        -- Notheilung: laufenden Zauber abbrechen, Verstärker zünden, heilen
+        return "macro", nil, "/stopcasting\n/cast " .. ns.combo.cd .. "\n/cast [@mouseover] " .. ns.combo.heal
+    elseif kind == "assist" and bind.spell then
+        -- Angriff auf das Ziel des angeklickten Spielers. Der Zauberstab
+        -- schießt nur auf das eigene Ziel, deshalb wird es dafür übernommen.
+        if bind.spell == ns.wandName then
+            return "macro", nil, "/target [@mouseovertarget,harm,nodead]\n/cast !" .. bind.spell
+        end
+        return "macro", nil, "/cast [@mouseovertarget,harm,nodead] " .. bind.spell
+    elseif kind == "target" then
+        return "target"
+    elseif kind == "menu" then
+        return "togglemenu"
+    end
+    -- "pin" hat keine geschützte Aktion: das erledigt OnPostClick
+end
+
 local function DoApplyBindings()
     local res = ns.db.context and ns.resName
+    local brez = ns.db.context and ns.brezName
     for _, b in ipairs(buttons) do
         for _, mod in ipairs(ns.MODS) do
             local p = mod.key
             for n = 1, #ns.BUTTONS do
-                local bind = ns.cdb.bindings[p][n]
-                local kind = bind and bind.kind
-                local type, spell, macro
-                if kind == "spell" and bind.spell then
-                    if res and bind.spell ~= res then
-                        -- Kontext-Klick: tote Spieler außerhalb des Kampfes wiederbeleben
-                        type = "macro"
-                        macro = ("/cast [@mouseover,help,dead,nocombat] %s; [@mouseover] %s"):format(res, ns.MacroSpell(bind))
-                    else
-                        type, spell = "spell", ns.ResolveSpell(bind)
-                    end
-                elseif kind == "target" then
-                    type = "target"
-                elseif kind == "menu" then
-                    type = "togglemenu"
-                end
-                -- "pin" hat keine geschützte Aktion: das erledigt OnPostClick
+                local type, spell, macro = ClickAction(ns.cdb.bindings[p][n], res, brez)
                 b:SetAttribute(p .. "type" .. n, type)
                 b:SetAttribute(p .. "spell" .. n, spell)
                 b:SetAttribute(p .. "macrotext" .. n, macro)
@@ -520,6 +588,7 @@ end
 
 function ns.ApplyBindings()
     if container then ns.AfterCombat(DoApplyBindings) end
+    if ns.UpdateLegend then ns.UpdateLegend() end
 end
 
 local function ShowTooltip(b)
@@ -528,17 +597,7 @@ local function ShowTooltip(b)
     GameTooltip:AddLine(UnitName(b.unit) or "")
     for _, mod in ipairs(ns.MODS) do
         for n = 1, #ns.BUTTONS do
-            local bind = ns.cdb.bindings[mod.key][n]
-            local text
-            if bind and bind.kind == "spell" and bind.spell then
-                text = bind.max and bind.spell or ns.MacroSpell(bind)
-            elseif bind and bind.kind == "target" then
-                text = L["Target"]
-            elseif bind and bind.kind == "menu" then
-                text = L["Menu"]
-            elseif bind and bind.kind == "pin" then
-                text = L["Pin heal target"]
-            end
+            local text = ns.BindingInfo(ns.cdb.bindings[mod.key][n])
             if text then
                 local key = (mod.key ~= "" and (mod.label .. " + ") or "") .. ns.BUTTONS[n]
                 GameTooltip:AddDoubleLine(key, text, 0.7, 0.7, 0.7, 1, 1, 1)
@@ -646,6 +705,7 @@ end
 local function DoPins()
     if preview > 0 then return DoLayout() end
     local byName = GroupNames()
+    rosterByName = byName
     wipe(pinByUnit)
     local shown = 0
     for _, name in ipairs(ns.cdb.pins) do
@@ -698,6 +758,89 @@ function ns.TogglePin(unit)
     ns.AfterCombat(DoPins)
 end
 
+---------------------------------------------------------------------------
+-- Vorschau für Gruppenheilungen: liegt ein Zauber wie Gebet der Heilung auf
+-- einer Taste, leuchtet beim Überfahren die ganze Gruppe des Spielers auf.
+---------------------------------------------------------------------------
+local function HasGroupSpell()
+    for _, mod in ipairs(ns.MODS) do
+        for n = 1, #ns.BUTTONS do
+            local bind = ns.cdb.bindings[mod.key][n]
+            if bind and bind.kind == "spell" and bind.spell and ns.groupSpells[bind.spell] then return true end
+        end
+    end
+    return false
+end
+
+local function GroupOf(b)
+    local index = b.unit and tonumber(b.unit:match("^raid(%d+)$"))
+    if not index then return nil end
+    if b.preview then return math.floor((index - 1) / 5) + 1 end
+    local _, _, group = GetRaidRosterInfo(index)
+    if not group or issecret(group) then return nil end
+    return group
+end
+
+local function ShowGroupGlow(b)
+    if not HasGroupSpell() then return end
+    local group = GroupOf(b)
+    if not group then return end
+    for _, other in ipairs(buttons) do
+        other.glow:SetShown(other:IsVisible() and GroupOf(other) == group)
+    end
+end
+
+local function HideGroupGlow()
+    for _, b in ipairs(buttons) do b.glow:Hide() end
+end
+
+---------------------------------------------------------------------------
+-- Mana-Hilferuf: ein Klick auf den eigenen Manabalken schickt eine
+-- Addon-Nachricht an die Gruppe; bei allen mit Healbuddy blinkt dann ein
+-- Mana-Symbol auf dem Frame des Rufenden.
+---------------------------------------------------------------------------
+local COMM_PREFIX = "Healbuddy"
+local lastManaCall = 0
+
+local function ShowManaCall(unit)
+    local function show(b)
+        if not b then return end
+        b.manaCall:Show()
+        b.manaPulse:Play()
+        local token = (b.manaToken or 0) + 1
+        b.manaToken = token
+        C_Timer.After(15, function()
+            if b.manaToken ~= token then return end
+            b.manaPulse:Stop()
+            b.manaCall:Hide()
+        end)
+    end
+    show(byUnit[unit])
+    show(pinByUnit[unit])
+end
+
+local function OnAddonMessage(prefix, text, _, sender)
+    if issecret(prefix) or prefix ~= COMM_PREFIX then return end
+    if issecret(text) or text ~= "MANA" or not sender or issecret(sender) then return end
+    local name = Ambiguate and Ambiguate(sender, "none") or sender
+    local unit = rosterByName[name] or rosterByName[sender] or GroupNames()[name]
+    if unit then ShowManaCall(unit) end
+    ns.Print(L["%s is calling for mana."]:format(name))
+end
+
+function ns.CallForMana()
+    if not (IsInGroup and IsInGroup()) then return ns.Print(L["You are not in a group."]) end
+    if not (C_ChatInfo and C_ChatInfo.SendAddonMessage) then return ns.Print(L["Could not send the mana call."]) end
+    local now = GetTime()
+    if now - lastManaCall < 10 then return end
+    local ok, result = pcall(C_ChatInfo.SendAddonMessage, COMM_PREFIX, "MANA", IsInRaid() and "RAID" or "PARTY")
+    -- Je nach Client: true/false oder ein Ergebniscode (0 = Erfolg)
+    if not ok or result == false or (type(result) == "number" and result ~= 0) then
+        return ns.Print(L["Could not send the mana call."])
+    end
+    lastManaCall = now
+end
+
 local BUTTON_INDEX = { LeftButton = 1, RightButton = 2, MiddleButton = 3, Button4 = 4, Button5 = 5 }
 
 -- Läuft nach dem geschützten Klick; hier nur die Aktion "Heilziel anpinnen"
@@ -715,6 +858,7 @@ end
 -- Vorschau mit Beispiel-Frames (nur außerhalb des Kampfes)
 ---------------------------------------------------------------------------
 local PREVIEW_CLASSES = { "WARRIOR", "PRIEST", "DRUID", "MAGE", "ROGUE", "HUNTER", "PALADIN", "SHAMAN", "WARLOCK" }
+local PREVIEW_MANA = { PRIEST = true, DRUID = true, MAGE = true, PALADIN = true, SHAMAN = true, WARLOCK = true, HUNTER = true }
 local PREVIEW_HP = { 100, 82, 100, 55, 100, 100, 30, 91, 100, 0 }
 
 local function DoPreview()
@@ -729,6 +873,7 @@ local function DoPreview()
                     name = LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[class] or class,
                     class = class, hp = hp, heal = hp == 55 and 25 or 0,
                     aggro = i == 1, far = i % 9 == 0,
+                    mana = PREVIEW_MANA[class] and (40 + (i * 17) % 60) or nil,
                 }
                 b:Show()
             else
@@ -1030,10 +1175,42 @@ local function CreateUnitButton(unit, kind, col, row, driver)
     b.pred:SetMinMaxValues(0, 1)
     b.pred:SetValue(0)
 
+    b.power = CreateFrame("StatusBar", nil, content)
+    b.power:SetPoint("BOTTOMLEFT")
+    b.power:SetPoint("BOTTOMRIGHT")
+    b.power:SetHeight(2)
+    b.power:SetFrameLevel(b.bar:GetFrameLevel() + 2)
+    b.power:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
+    b.power:SetStatusBarColor(0.3, 0.55, 1)
+    local powerBg = b.power:CreateTexture(nil, "BACKGROUND")
+    powerBg:SetAllPoints()
+    powerBg:SetColorTexture(0, 0, 0, 0.6)
+    b.power:Hide()
+
     local over = CreateFrame("Frame", nil, content)
     over:SetAllPoints()
     over:SetFrameLevel(b.bar:GetFrameLevel() + 3)
     b.over = over
+
+    -- Gruppe des überfahrenen Spielers (Vorschau für Gruppenheilungen)
+    b.glow = over:CreateTexture(nil, "OVERLAY", nil, 6)
+    b.glow:SetAllPoints()
+    b.glow:SetColorTexture(1, 0.85, 0.3, 0.22)
+    b.glow:Hide()
+
+    -- Mana-Hilferuf dieses Spielers
+    b.manaCall = over:CreateTexture(nil, "OVERLAY", nil, 5)
+    b.manaCall:SetTexture("Interface\\Icons\\Spell_Nature_Lightning")
+    b.manaCall:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    b.manaCall:SetSize(14, 14)
+    b.manaCall:SetPoint("LEFT", 10, 0)
+    b.manaCall:Hide()
+    b.manaPulse = b.manaCall:CreateAnimationGroup()
+    b.manaPulse:SetLooping("BOUNCE")
+    local pulse = b.manaPulse:CreateAnimation("Alpha")
+    pulse:SetFromAlpha(1)
+    pulse:SetToAlpha(0.25)
+    pulse:SetDuration(0.5)
 
     b.name = over:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     b.name:SetPoint("TOPLEFT", 3, -3)
@@ -1091,7 +1268,7 @@ local function CreateUnitButton(unit, kind, col, row, driver)
     bhl:SetColorTexture(1, 1, 1, 0.3)
     bb:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine(L["%s missing"]:format(self.spell or "Buff"))
+        GameTooltip:AddLine((self.state == "expiring" and L["%s expires soon"] or L["%s missing"]):format(self.spell or "Buff"))
         GameTooltip:AddLine(L["Click to buff"], 1, 1, 1)
         GameTooltip:Show()
     end)
@@ -1111,6 +1288,8 @@ local function CreateUnitButton(unit, kind, col, row, driver)
     b:SetScript("PostClick", function(self, button) ns.Safe(OnPostClick, self, button) end)
     b:HookScript("OnEnter", function(self) ns.Safe(ShowTooltip, self) end)
     b:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    b:HookScript("OnEnter", function(self) ns.Safe(ShowGroupGlow, self) end)
+    b:HookScript("OnLeave", HideGroupGlow)
     RegisterStateDriver(b, "visibility", (kind ~= "pet" or ns.db.pets) and driver or "hide")
 
     buttons[index] = b
@@ -1172,6 +1351,7 @@ local function DoSkin()
         if b:IsVisible() then UpdateAll(b) end
     end
     if ns.UpdateCooldowns then ns.UpdateCooldowns() end
+    if ns.UpdateLegend then ns.UpdateLegend() end
 end
 
 function ns.ApplySkin()
@@ -1200,12 +1380,16 @@ local unitEvents = {
     UNIT_AURA = UpdateAuras,
     UNIT_NAME_UPDATE = UpdateName,
     UNIT_THREAT_SITUATION_UPDATE = UpdateThreat,
+    UNIT_POWER_UPDATE = UpdatePower,
+    UNIT_MAXPOWER = UpdatePower,
+    UNIT_DISPLAYPOWER = UpdatePower,
 }
 
 local otherEvents = {
     "GROUP_ROSTER_UPDATE", "PLAYER_ENTERING_WORLD", "UNIT_PET", "RAID_TARGET_UPDATE",
     "PLAYER_REGEN_ENABLED", "PLAYER_REGEN_DISABLED", "UI_ERROR_MESSAGE",
     "READY_CHECK", "READY_CHECK_CONFIRM", "READY_CHECK_FINISHED", "INCOMING_RESURRECT_CHANGED",
+    "CHAT_MSG_ADDON",
 }
 
 function ns.CreateFrames()
@@ -1266,19 +1450,25 @@ function ns.CreateFrames()
     ns.ApplyBindings()
     ns.AfterCombat(DoPins)
     ns.Safe(ns.CreateCooldowns, container)
+    ns.Safe(ns.CreateLegend, container)
     ns.Safe(ns.CreateFSR, container)
+    if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then
+        pcall(C_ChatInfo.RegisterAddonMessagePrefix, COMM_PREFIX)
+    end
 
     local ev = CreateFrame("Frame")
     -- Nicht jeder Client kennt jedes Event; unbekannte einfach auslassen
     for event in pairs(unitEvents) do pcall(ev.RegisterEvent, ev, event) end
     for _, event in ipairs(otherEvents) do pcall(ev.RegisterEvent, ev, event) end
-    ev:SetScript("OnEvent", function(_, event, unit)
+    ev:SetScript("OnEvent", function(_, event, unit, arg2, arg3, arg4)
         local handler = unitEvents[event]
         if handler then
             local b = byUnit[unit]
             if b and b:IsVisible() and not b.preview then ns.Safe(handler, b) end
             local pin = pinByUnit[unit]
             if pin and pin:IsVisible() then ns.Safe(handler, pin) end
+        elseif event == "CHAT_MSG_ADDON" then
+            ns.Safe(OnAddonMessage, unit, arg2, arg3, arg4)
         elseif event == "RAID_TARGET_UPDATE" then
             ForVisible(UpdateRaidTarget)
         elseif event == "UI_ERROR_MESSAGE" then
@@ -1325,5 +1515,9 @@ function ns.CreateFrames()
     C_Timer.NewTicker(0.3, function()
         ForVisible(UpdateRange)
         ns.Safe(UpdateBuffAll)
+    end)
+    -- Auslaufende Buffs lösen kein Event aus: gelegentlich nachsehen
+    C_Timer.NewTicker(10, function()
+        if not InCombatLockdown() then ForVisible(UpdateBuffButton) end
     end)
 end

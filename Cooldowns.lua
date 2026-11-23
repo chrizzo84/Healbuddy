@@ -67,14 +67,13 @@ end
 -- Im Kampf sind Abklingzeiten geheim; das "Duration"-Objekt darf man trotzdem
 -- an die Cooldown-Anzeige durchreichen. Der zweite Parameter blendet die
 -- globale Abklingzeit aus.
-local function UpdateIcon(ic)
-    local cd = ic.cd
+function ns.SetSpellCooldown(cd, id)
     if C_Spell and C_Spell.GetSpellCooldownDuration and cd.SetCooldownFromDurationObject then
-        local duration = C_Spell.GetSpellCooldownDuration(ic.id, true)
+        local duration = C_Spell.GetSpellCooldownDuration(id, true)
         if duration then cd:SetCooldownFromDurationObject(duration) else cd:Clear() end
         return
     end
-    local info = C_Spell and C_Spell.GetSpellCooldown and C_Spell.GetSpellCooldown(ic.id)
+    local info = C_Spell and C_Spell.GetSpellCooldown and C_Spell.GetSpellCooldown(id)
     if not info then return cd:Clear() end
     if issecret(info.startTime) or issecret(info.duration) then return end
     if info.duration and info.duration > 1.5 then
@@ -86,7 +85,7 @@ end
 
 local function Refresh()
     for _, ic in ipairs(icons) do
-        if ic:IsShown() then ns.Safe(UpdateIcon, ic) end
+        if ic:IsShown() then ns.Safe(ns.SetSpellCooldown, ic.cd, ic.id) end
     end
 end
 

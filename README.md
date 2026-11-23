@@ -19,10 +19,20 @@ Sprache des Spiels.*
   border for debuffs you can dispel
 - **Aggro border**, incoming heals, range fading, raid target icons, ready
   check and incoming resurrection
-- **Missing class buff** indicator per player, plus one button to buff
-  everyone who needs it
+- **Missing or expiring class buff** indicator per player, plus one button to
+  buff everyone who needs it
 - **Optional**: resurrect dead players with your normal heal click (out of
   combat), show pets
+- **Binding legend**: icons above the frames show what is on each mouse button
+  and switch live while you hold Shift, Ctrl or Alt
+- **Emergency heal** as a ready-made click action: cancel the current cast, use
+  your instant-cast cooldown, heal
+- **Attack through a player**: bind the wand or a damage spell and it is used
+  on the target of the player you click
+- **Call for mana** with one click, visible to everyone using Healbuddy, plus
+  thin mana bars on the frames
+- **Group heal preview**: hovering a player highlights everyone a group heal
+  would reach
 - **Pinned heal targets**: put up to five players into a larger row at the top
   with one click
 - **Rank ladder**: three ranks of a spell on one mouse button (click, Shift,

@@ -100,7 +100,24 @@ local CLASS_DEFAULTS = {
     },
 }
 ns.CLASS_DEFAULTS = CLASS_DEFAULTS
-local RES = { PRIEST = 2006, PALADIN = 7328, SHAMAN = 2008 }
+local RES = { PRIEST = 2006, PALADIN = 7328, SHAMAN = 2008, DRUID = 50769 }
+-- Wiederbelebung im Kampf
+local BREZ = { DRUID = 20484 }
+-- Notheilung: { sofort wirkender Verstärker, Heilzauber-Kandidaten }
+local COMBO = {
+    DRUID = { 17116, 5185 },
+    SHAMAN = { 16188, 331 },
+    PRIEST = { 14751, 2060, 2054 },
+    PALADIN = { 20216, 635 },
+}
+-- Zauber, die die ganze Gruppe des Ziels heilen (Gebet der Heilung, Kreis der Heilung)
+local GROUP_HEALS = { 596, 34861 }
+local WAND = 5019
+ns.ICONS = {
+    target = "Interface\\Icons\\Ability_Hunter_SniperShot",
+    menu = "Interface\\Icons\\INV_Misc_Note_01",
+    pin = "Interface\\Icons\\Spell_ChargePositive",
+}
 -- Klassenbuff: Einzelbuff zuerst (wird beim Klick gewirkt), danach Gruppenversion
 local CLASS_BUFF = {
     PRIEST = { 1243, 21562 },
@@ -114,6 +131,8 @@ local CLASS_BUFF = {
 ns.spells = {}     -- [name] = { name, icon, ranks = { { id, label, sub, n }, ... } }
 ns.spellList = {}  -- alphabetisch sortiert
 ns.known = {}      -- [name] = Eintrag, auch für Nicht-Hilfszauber
+ns.harmList = {}   -- Schadenszauber, alphabetisch (Zauberstab zuerst)
+ns.groupSpells = {}
 
 local function IsHelpful(id, name)
     if C_Spell and C_Spell.IsSpellHelpful then return C_Spell.IsSpellHelpful(id) end
@@ -185,6 +204,28 @@ local function UpdateClassData()
 
     local res = RES[class] and ns.SpellName(RES[class])
     ns.resName = res and ns.known[res] and res or nil
+    local brez = BREZ[class] and ns.SpellName(BREZ[class])
+    ns.brezName = brez and ns.known[brez] and brez or nil
+
+    ns.combo = nil
+    local combo = COMBO[class]
+    local boost = combo and ns.SpellName(combo[1])
+    if boost and ns.known[boost] then
+        for i = 2, #combo do
+            local heal = ns.SpellName(combo[i])
+            if heal and ns.known[heal] then
+                local entry = ns.known[boost]
+                ns.combo = { cd = boost, heal = heal, icon = entry.icon, id = entry.ranks[#entry.ranks].id }
+                break
+            end
+        end
+    end
+
+    ns.groupSpells = {}
+    for _, id in ipairs(GROUP_HEALS) do
+        local name = ns.SpellName(id)
+        if name then ns.groupSpells[name] = true end
+    end
 
     ns.classBuff = nil
     local ids = CLASS_BUFF[class]
@@ -219,7 +260,9 @@ function ns.ScanSpells()
         if helpful then entry.helpful = true end
         if helpful == nil then entry.unknown = true end
         -- Weder Hilfs- noch Schadenszauber (z. B. ohne Ziel): ebenfalls anbieten
-        if not helpful and IsHarmful(id, name) == false then entry.neutral = true end
+        local harmful = IsHarmful(id, name)
+        if harmful then entry.harmful = true end
+        if not helpful and harmful == false then entry.neutral = true end
         if dual[name] then entry.helpful = true end
         sub = Subtext(id, sub)
         local n = sub and tonumber(sub:match("%d+"))
@@ -247,7 +290,18 @@ function ns.ScanSpells()
         end
     end
     table.sort(list, function(a, b) return a.name < b.name end)
-    ns.spells, ns.spellList, ns.known = spells, list, all
+
+    -- Schadenszauber für "Angriff über den angeklickten Spieler"; der Zauberstab zuerst
+    local harm = {}
+    local wand = ns.SpellName(WAND)
+    ns.wandName = wand and all[wand] and wand or nil
+    for name, e in pairs(all) do
+        if e.harmful and name ~= ns.wandName then table.insert(harm, e) end
+    end
+    table.sort(harm, function(a, b) return a.name < b.name end)
+    if ns.wandName then table.insert(harm, 1, all[ns.wandName]) end
+
+    ns.spells, ns.spellList, ns.known, ns.harmList = spells, list, all, harm
     UpdateClassData()
 end
 
@@ -287,6 +341,8 @@ local function Defaults()
     if db.colorMode == nil then db.colorMode = "class" end
     if db.percent == nil then db.percent = true end
     if db.minimapAngle == nil then db.minimapAngle = 215 end
+    if db.legend == nil then db.legend = true end
+    if db.legendEmpty == nil then db.legendEmpty = true end
     if not cdb.bindings then
         cdb.bindings = {}
         cdb.needSetup = true
@@ -332,6 +388,29 @@ function ns.MacroSpell(binding)
     return binding.spell
 end
 
+-- Anzeige einer Belegung: Text, Icon und Zauber-ID (für die Abklingzeit)
+function ns.BindingInfo(bind)
+    local kind = bind and bind.kind
+    if kind == "spell" and bind.spell then
+        local entry = ns.known[bind.spell]
+        local id = entry and ((not bind.max and bind.id) or entry.ranks[#entry.ranks].id)
+        return bind.max and bind.spell or ns.MacroSpell(bind), entry and entry.icon, id
+    elseif kind == "assist" and bind.spell then
+        local entry = ns.known[bind.spell]
+        return L["Attack: %s"]:format(bind.spell), entry and entry.icon, entry and entry.ranks[#entry.ranks].id
+    elseif kind == "combo" then
+        local combo = ns.combo
+        if not combo then return L["Emergency heal"] end
+        return L["Emergency heal"] .. " (" .. combo.cd .. " + " .. combo.heal .. ")", combo.icon, combo.id
+    elseif kind == "target" then
+        return L["Target"], ns.ICONS.target
+    elseif kind == "menu" then
+        return L["Menu"], ns.ICONS.menu
+    elseif kind == "pin" then
+        return L["Pin heal target"], ns.ICONS.pin
+    end
+end
+
 -- Sinnvolle Startbelegung für die Klasse; force = vorhandene Belegung überschreiben
 function ns.AutoSetup(force)
     local cdb = ns.cdb
@@ -354,6 +433,7 @@ function ns.AutoSetup(force)
     if b[""][1] then b["alt-"][1] = { kind = "target" } else b[""][1] = { kind = "target" } end
     if b[""][2] then b["alt-"][2] = { kind = "menu" } else b[""][2] = { kind = "menu" } end
     b["alt-"][3] = { kind = "pin" }
+    if ns.combo then b["shift-"][3] = { kind = "combo" } end
 
     cdb.bindings = b
     -- Hat die Klasse Heilzauber, kennt sie aber noch nicht: später erneut versuchen

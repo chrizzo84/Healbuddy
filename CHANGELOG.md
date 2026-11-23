@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.4.0
+
+- Binding legend: a row of icons above the frames shows what is on each mouse
+  button and switches while you hold Shift, Ctrl or Alt (can be turned off,
+  unbound buttons can be hidden)
+- Emergency heal: new click action that cancels the current cast, uses your
+  instant-cast cooldown (e.g. Nature's Swiftness) and heals
+- Attack through a player: damage spells and the wand can be bound and are
+  used on the target of the player you click
+- Call for mana: click your mana bar and everyone using Healbuddy sees a mana
+  symbol on your frame
+- Thin mana bars on the frames of mana users
+- Group heal preview: with Prayer of Healing or Circle of Healing bound,
+  hovering a player highlights their whole group
+- Druids: the "resurrect with heal clicks" option casts Rebirth in combat
+- The buff buttons now also appear when a class buff is about to expire
+
 ## v0.3.1
 
 - Cooldowns: Power Word: Shield is shown by default; every spell that has a

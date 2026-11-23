@@ -150,12 +150,19 @@ end
 local function ActionItems()
     local items = {
         { value = "none", text = "|cff888888" .. L["– nothing –"] .. "|r" },
-        { value = "target", text = L["Target"], icon = "Interface\\Icons\\Ability_Hunter_SniperShot" },
-        { value = "menu", text = L["Menu"], icon = "Interface\\Icons\\INV_Misc_Note_01" },
-        { value = "pin", text = L["Pin heal target"], icon = "Interface\\Icons\\Spell_ChargePositive" },
+        { value = "target", text = L["Target"], icon = ns.ICONS.target },
+        { value = "menu", text = L["Menu"], icon = ns.ICONS.menu },
+        { value = "pin", text = L["Pin heal target"], icon = ns.ICONS.pin },
     }
+    if ns.combo then
+        table.insert(items, { value = "combo", text = L["Emergency heal"], icon = ns.combo.icon })
+    end
     for _, s in ipairs(ns.spellList) do
         table.insert(items, { value = "spell:" .. s.name, text = s.name, icon = s.icon })
+    end
+    -- Schadenszauber: wirken auf das Ziel des angeklickten Spielers
+    for _, s in ipairs(ns.harmList) do
+        table.insert(items, { value = "assist:" .. s.name, text = L["Attack: %s"]:format(s.name), icon = s.icon })
     end
     return items
 end
@@ -163,7 +170,16 @@ end
 local function RefreshRow(row)
     local bind = ns.GetBinding(currentMod, row.index)
     local isSpell = bind.kind == "spell" and bind.spell
-    row.action:Set(isSpell and ("spell:" .. bind.spell) or bind.kind, isSpell and (bind.spell .. " |cffff5555" .. L["(not learned)"] .. "|r") or nil)
+    local missing = " |cffff5555" .. L["(not learned)"] .. "|r"
+    if isSpell then
+        row.action:Set("spell:" .. bind.spell, bind.spell .. missing)
+    elseif bind.kind == "assist" and bind.spell then
+        row.action:Set("assist:" .. bind.spell, bind.spell .. missing)
+    elseif bind.kind == "combo" then
+        row.action:Set("combo", L["Emergency heal"] .. missing)
+    else
+        row.action:Set(bind.kind)
+    end
 
     local spell = isSpell and ns.spells[bind.spell]
     local hasRanks = spell and #spell.ranks > 1
@@ -286,12 +302,19 @@ local function CreateRow(parent, index, y)
     row.action = CreateDropdown(parent, 190, ActionItems, function(value)
         local bind = ns.GetBinding(currentMod, index)
         local spell = value:match("^spell:(.+)$")
+        local assist = value:match("^assist:(.+)$")
         if spell then
             if bind.spell ~= spell then bind.id = nil end
             bind.kind, bind.spell = "spell", spell
             if bind.max == nil or not bind.id then bind.max = true end
+        elseif assist then
+            bind.kind, bind.spell, bind.id, bind.max = "assist", assist, nil, true
+            ns.Print(L["%s is cast on the target of the player you click."]:format(assist))
         else
             bind.kind = value
+            if value == "combo" and ns.combo then
+                ns.Print(L["Emergency heal: cancels the current cast, uses %s and casts %s."]:format(ns.combo.cd, ns.combo.heal))
+            end
         end
         Changed()
     end)
@@ -423,8 +446,8 @@ local function CreateBindPage(page)
         rows[i] = CreateRow(page, i, -74 - (i - 1) * 28)
     end
 
-    Check(page, "context", L["Resurrect the dead with heal clicks (out of combat)"], 12, -220, function()
-        if ns.db.context and not ns.resName then
+    Check(page, "context", L["Resurrect the dead with heal clicks"], 12, -220, function()
+        if ns.db.context and not ns.resName and not ns.brezName then
             ns.Print(L["Your class has not learned a suitable resurrection spell."])
         end
         Changed()
@@ -489,6 +512,8 @@ local function CreateLookPage(page)
     Check(page, "fsr", L["Mana bar with 5-second rule and ticks"], 12, -172, ns.UpdateFSR)
     Check(page, "pets", L["Show pets (party)"], 286, -172, ns.UpdatePets)
     Check(page, "locked", L["Lock position (hide title bar)"], 12, -198, ns.UpdateLock)
+    Check(page, "legend", L["Legend of the click bindings"], 286, -198, ns.UpdateLegend)
+    Check(page, "legendEmpty", L["Legend: also show unbound buttons"], 286, -224, ns.UpdateLegend)
 end
 
 local function CreateCooldownPage(page)
